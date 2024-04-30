@@ -6,6 +6,9 @@
 #include <functional>
 #include <algorithm>
 #include <exception>
+#include <future>
+#include <tuple>
+#include <type_traits>
 
 #include <boost/signals2.hpp>
 #include <boost/mysql.hpp>
@@ -13,43 +16,58 @@
 
 #include <spdlog/spdlog.h>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/noncopyable.hpp>
 
 #include "Data.h"
 #include "errc.h"
+#include "relation.h"
 
 //represents data and query read or written to the database
 using namespace boost::asio::experimental::awaitable_operators;
 namespace pof {
 	namespace base {
+
+		boost::mysql::datetime to_mysql_datetime(const pof::base::data::datetime_t& tt);
+		boost::mysql::blob to_mysql_uuid(const pof::base::data::duuid_t& duuid);
+
 		template<typename manager>
-		struct query : public std::enable_shared_from_this<query<manager>> {
+		struct query : public std::enable_shared_from_this<query<manager>>, private boost::noncopyable {
 			using default_token = boost::asio::as_tuple_t<boost::asio::use_awaitable_t<>>;
 			using timer_t = default_token::as_default_on_t<boost::asio::steady_timer>;
 
 			using shared_t = std::enable_shared_from_this<query<manager>>;
 			static constexpr auto tuple_awaitable = boost::asio::as_tuple(boost::asio::use_awaitable);
 
-			boost::signals2::signal<void(std::error_code, std::shared_ptr<query>)> m_sig;
 			std::string m_sql;
 			std::shared_ptr<pof::base::data> m_data;
 
 			boost::mysql::diagnostics m_diag; //server diagonis
 			std::shared_ptr<manager> m_manager; //must be the database manager
+			std::promise<std::shared_ptr<pof::base::data>> m_promise;
+
+			manager::conn_ptr m_connection;
 
 			query(std::shared_ptr<manager> man = nullptr) : m_manager(man) {
 				m_data = std::make_shared<pof::base::data>();
 			}
 
+			virtual ~query() {}
+
+			std::future<std::shared_ptr<pof::base::data>> get_future(){
+				return m_promise.get_future();
+			}
 			//Text query
 			virtual boost::asio::awaitable<void> operator()() {
+				auto this_ = shared_t::shared_from_this(); //hold till we leave the coroutine
+				
 				boost::mysql::results result;
 
 				timer_t timer(co_await boost::asio::this_coro::executor);
-				timer.expires_after(std::chrono::minutes(1));
+				timer.expires_after(std::chrono::seconds(60));
 				try {
 					std::error_code ec;
 					auto complete
-						= co_await(m_manager->connection().async_execute(m_sql, result, tuple_awaitable)
+						= co_await(m_connection->async_query(m_sql, result, tuple_awaitable)
 							|| timer.async_wait());
 
 					switch (complete.index())
@@ -57,26 +75,26 @@ namespace pof {
 					case 0:
 						timer.cancel();
 						ec = std::get<0>(std::get<0>(complete));
+						boost::mysql::throw_on_error(ec, m_diag);
 						break;
 					case 1:
 						//what happens if we timeout ?
 						//signal the query on timeout ...
-						//ec = std::error_code(boost::asio::error::timed_out);
 						ec = boost::system::error_code(boost::asio::error::timed_out);
+						boost::mysql::throw_on_error(ec, m_diag);
 						break; //
 					default:
 						break;
 					}
 
-					if (ec) {
-						//spdlog::error("{:ec}", std::error_code(ec));
-						m_sig(ec, shared_t::shared_from_this());
+					if (!result.has_value()) {
+						//query did not return a value, is this an error ?
+						m_promise.set_value(nullptr); //set an empty data ? 
 						co_return;
 					}
-					if (!result.has_value()) {
-						//query did not return a value
-						//spdlog::info("{:ec}, {}", std::error_code(ec), result.info());
-						m_sig(ec, shared_t::shared_from_this());
+					else if (result.rows().empty()) {
+						m_promise.set_value(m_data); //set an empty data ? 
+						co_return;
 					}
 					else {
 						const auto& meta = result.meta();
@@ -121,99 +139,270 @@ namespace pof {
 							}
 						}
 						const auto& rows = result.rows();
+
 						m_data->reserve(rows.size());
 						for (const auto& row : rows) {
 							//copy data
+							size_t i = 0;
+							std::vector<pof::base::data::data_t> v;
+							v.resize(meta.size()); //
 
+							for (const auto& m : meta)
+							{
+								auto k = m.type();
+								
+								switch (k)
+								{
+								case boost::mysql::column_type::int_:
+								case boost::mysql::column_type::bigint:
+								case boost::mysql::column_type::decimal:
+									v[i] = row.at(i).as_int64();
+									break;
+								case boost::mysql::column_type::float_:
+									v[i] = row.at(i).as_float();
+									break;
+								case boost::mysql::column_type::double_:
+									v[i] = row.at(i).as_double();
+									break;
+								
+								case boost::mysql::column_type::bit:
+								case boost::mysql::column_type::binary:
+								case boost::mysql::column_type::varbinary:
+								case boost::mysql::column_type::blob:
+								{
+									auto bv = row.at(i).as_blob();
+									pof::base::data::blob_t blob;
+									blob.reserve(bv.size());
+
+									std::ranges::copy(bv, std::back_inserter(blob));
+									v[i] = std::move(blob);
+								}
+									break;
+
+								case boost::mysql::column_type::time:
+								case boost::mysql::column_type::date:
+								case boost::mysql::column_type::datetime:
+								case boost::mysql::column_type::timestamp:
+									v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
+									break;
+								case boost::mysql::column_type::char_:
+								case boost::mysql::column_type::varchar:
+								case boost::mysql::column_type::text:
+								case boost::mysql::column_type::enum_:
+								case boost::mysql::column_type::set:
+								case boost::mysql::column_type::json:
+									v[i] = pof::base::data::text_t(row.at(i).as_string());
+									break;
+								case boost::mysql::column_type::unknown:
+									break;
+								default:
+									break;
+								}
+								i++; //next column
+							}
+							m_data->emplace(std::move(v));
 
 						}
-						m_sig(ec, shared_t::shared_from_this()); //data moved into the datamodels cache
+						m_promise.set_value(m_data); //set the data
 					}
-				}catch (std::exception& exp) {
-					auto why = exp.what();
-					spdlog::info("{}", why);
+				}catch (...) {
+					m_promise.set_exception(std::current_exception());
 			    }
 			}
 		};
 
 		//Statement queries may require arguments
-		template<typename manager, typename... args>
+		template<typename manager>
 		struct querystmt : public query<manager> {
 			using base_t = query<manager>;
-			std::tuple<args...> m_arguments;
+			using row_t = std::vector<boost::mysql::field>;
+			using data_t = std::vector<row_t>;
+			boost::mysql::statement stmt;
+			data_t m_arguments;
 
 			querystmt(std::shared_ptr<manager> manager = nullptr) : base_t(manager) {}
-
-			virtual boost::asio::awaitable<void> operator()() override {
-				boost::mysql::statement stmt;
-				std::error_code ec;
+			querystmt(std::shared_ptr<manager> manager, const std::string& sql) : base_t(manager){
+				base_t::m_sql = sql;
+			}
+			virtual ~querystmt() {
 				auto& conn = base_t::m_manager->connection();
+				conn.close_statement(stmt); //blocks might be a bottle neck
+			}
+			virtual boost::asio::awaitable<void> operator()() override {
+				auto this_ = base_t::shared_t::shared_from_this(); //hold till we leave the coroutine
 
-				std::tie(ec) = co_await conn.async_prepare_statement(base_t::m_sql, stmt, base_t::m_diag, base_t::tuple_awaitable);
-				if (ec) {
-					base_t::mSig(ec, base_t::shared_t::shared_from_this());
-					co_return;
-				}
-				boost::mysql::results result;
-				std::tie(ec) = co_await conn.async_execute(m_arguments, result, base_t::mDiag, base_t::tuple_awaitable);
-				if (ec) {
-					base_t::mSig(ec, base_t::shared_t::shared_from_this());
-					co_return;
-				}
-				if (!result.has_value()) {
-					base_t::m_sig(ec, base_t::shared_t::shared_from_this());
-				}
-				else {
-					const auto& meta = result.meta();
-					auto& datameta = base_t::m_data->get_metadata();
-					datameta.reserve(meta.size());
-					for (const auto& m : meta) {
-						auto k = m.type();
-						switch (k)
+				std::error_code ec;
+				auto& conn = base_t::m_connection;
+				try {
+					typename base_t::timer_t timer(co_await boost::asio::this_coro::executor);
+					timer.expires_after(std::chrono::minutes(1));
+
+					auto complete = co_await(conn->async_prepare_statement(base_t::m_sql, base_t::m_diag, base_t::tuple_awaitable) || timer.async_wait());
+					switch (complete.index())
+					{
+					case 0:
+						timer.cancel();
+						ec = std::get<0>(std::get<0>(complete));
+						stmt = std::get<1>(std::get<0>(complete));
+						break;
+					case 1:
+						//what happens if we timeout ?
+						//signal the query on timeout ...
+						ec = boost::system::error_code(boost::asio::error::timed_out);
+						boost::mysql::throw_on_error(ec, base_t::m_diag);
+					default:
+						break;
+					}
+
+					boost::mysql::throw_on_error(ec, base_t::m_diag);
+					if (m_arguments.empty()) {
+						//use a text query if no arguments are needed
+						ec = boost::system::error_code(std::make_error_code(pof::base::errc::no_arguments));
+						boost::mysql::throw_on_error(ec, base_t::m_diag);
+					}
+					for (auto& arg : m_arguments) {
+						boost::mysql::results result;
+						timer.expires_after(std::chrono::minutes(1));
+						auto comp = co_await(conn.async_execute(stmt.bind(arg.begin(), arg.end()), result, base_t::m_diag, base_t::tuple_awaitable) ||
+							timer.async_wait());
+						switch (comp.index())
 						{
-						case boost::mysql::column_type::bigint:
-							datameta.emplace_back(pof::base::data::kind::uint64);
+						case 0:
+							timer.cancel();
+							ec = std::get<0>(std::get<0>(comp));
 							break;
-						case boost::mysql::column_type::smallint:
-							datameta.emplace_back(pof::base::data::kind::uint32);
-							break;
-						case boost::mysql::column_type::text:
-							datameta.emplace_back(pof::base::data::kind::text);
-							break;
-						case boost::mysql::column_type::json:
-							datameta.emplace_back(pof::base::data::kind::text);
-							break;
-						case boost::mysql::column_type::double_:
-							datameta.emplace_back(pof::base::data::kind::float64);
-							break;
-						case boost::mysql::column_type::float_:
-							datameta.emplace_back(pof::base::data::kind::float32);
-							break;
-						case boost::mysql::column_type::datetime:
-							datameta.emplace_back(pof::base::data::kind::datetime);
-							break;
-						case boost::mysql::column_type::blob:
-							datameta.emplace_back(pof::base::data::kind::float32);
-							break;
-						case boost::mysql::column_type::int_:
-							datameta.push_back(pof::base::data::kind::int32);
-							break;
-						case boost::mysql::column_type::unknown:
-							datameta.push_back(pof::base::data::kind::null);
-							break;
+						case 1:
+							//what happens if we timeout ?
+							//signal the query on timeout ...
+							ec = boost::system::error_code(boost::asio::error::timed_out);
+							boost::mysql::throw_on_error(ec, base_t::m_diag);
 						default:
 							break;
 						}
-					}
-					const auto& rows = result.rows();
-					base_t::m_data->reserve(rows.size());
-					for (const auto& row : rows) {
-						//copy data
 
+						boost::mysql::throw_on_error(ec, base_t::m_diag);
+						if (!result.has_value()) {
+							base_t::m_promise.set_value(nullptr);
+							co_return;
+						}
+						else if (result.empty()) {
+							base_t::m_promise.set_value(base_t::m_data);
+						}
+						else {
+							const auto& meta = result.meta();
+							auto& datameta = base_t::m_data->get_metadata();
+							datameta.reserve(meta.size());
+							for (const auto& m : meta) {
+								auto k = m.type();
+								switch (k)
+								{
+								case boost::mysql::column_type::bigint:
+									datameta.emplace_back(pof::base::data::kind::uint64);
+									break;
+								case boost::mysql::column_type::smallint:
+									datameta.emplace_back(pof::base::data::kind::uint32);
+									break;
+								case boost::mysql::column_type::text:
+									datameta.emplace_back(pof::base::data::kind::text);
+									break;
+								case boost::mysql::column_type::json:
+									datameta.emplace_back(pof::base::data::kind::text);
+									break;
+								case boost::mysql::column_type::double_:
+									datameta.emplace_back(pof::base::data::kind::float64);
+									break;
+								case boost::mysql::column_type::float_:
+									datameta.emplace_back(pof::base::data::kind::float32);
+									break;
+								case boost::mysql::column_type::datetime:
+									datameta.emplace_back(pof::base::data::kind::datetime);
+									break;
+								case boost::mysql::column_type::blob:
+									datameta.emplace_back(pof::base::data::kind::float32);
+									break;
+								case boost::mysql::column_type::int_:
+									datameta.push_back(pof::base::data::kind::int32);
+									break;
+								case boost::mysql::column_type::unknown:
+									datameta.push_back(pof::base::data::kind::null);
+									break;
+								default:
+									break;
+								}
+							}
+							const auto& rows = result.rows();
 
+							base_t::m_data->reserve(rows.size());
+							for (const auto& row : rows) {
+								//copy data
+								size_t i = 0;
+								std::vector<pof::base::data::data_t> v;
+								v.resize(meta.size()); //
+
+								for (const auto& m : meta)
+								{
+									auto k = m.type();
+
+									switch (k)
+									{
+									case boost::mysql::column_type::int_:
+										v[i] = row.at(i).as_int64();
+										break;
+									case boost::mysql::column_type::bigint:
+									case boost::mysql::column_type::decimal:
+										v[i] = row.at(i).as_uint64();
+										break;
+									case boost::mysql::column_type::float_:
+										v[i] = row.at(i).as_float();
+										break;
+									case boost::mysql::column_type::double_:
+										v[i] = row.at(i).as_double();
+										break;
+
+									case boost::mysql::column_type::bit:
+									case boost::mysql::column_type::binary:
+									case boost::mysql::column_type::varbinary:
+									case boost::mysql::column_type::blob:
+									{
+										auto bv = row.at(i).as_blob();
+										pof::base::data::blob_t blob;
+										blob.reserve(bv.size());
+
+										std::ranges::copy(bv, std::back_inserter(blob));
+										v[i] = std::move(blob);
+									}
+									break;
+
+									case boost::mysql::column_type::time:
+									case boost::mysql::column_type::date:
+									case boost::mysql::column_type::datetime:
+									case boost::mysql::column_type::timestamp:
+										v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
+										break;
+									case boost::mysql::column_type::char_:
+									case boost::mysql::column_type::varchar:
+									case boost::mysql::column_type::text:
+									case boost::mysql::column_type::enum_:
+									case boost::mysql::column_type::set:
+									case boost::mysql::column_type::json:
+										v[i] = pof::base::data::text_t(row.at(i).as_string());
+										break;
+									case boost::mysql::column_type::unknown:
+										break;
+									default:
+										break;
+									}
+									i++; //next column
+								}
+								base_t::m_data->emplace(std::move(v));
+							}
+						}
+						base_t::m_promise.set_value(base_t::m_data); //data moved into the datamodels cache
 					}
-					base_t::m_sig(ec, base_t::shared_t::shared_from_this()); //data moved into the datamodels cache
+				} catch (...) {
+					base_t::m_promise.set_exception(std::current_exception());
 				}
+
 			}
 		};
 	}

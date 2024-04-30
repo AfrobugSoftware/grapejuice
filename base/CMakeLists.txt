@@ -11,9 +11,6 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/bcrypt)
 add_library(base SHARED ${incs} ${srcs})
 set_target_properties(base PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-message(STATUS ${CONAN_INCLUDE_DIRS_DATE})
-
-target_include_directories(base PUBLIC ${PROJECT_SOURCE_DIR}/include ${CONAN_INCLUDE_DIRS_BOOST} ${CONAN_INCLUDE_DIRS_DATE})
-target_link_directories(base PRIVATE ${CONAN_LIB_DIRS_BOOST})
-target_link_libraries(base PRIVATE bbcrypt boost_serialization boost_url boost_iostreams boost_system ${CONAN_LIBS_OPENSSL} ${CONAN_LIBS_ZLIB} ${CONAN_LIBS_FMT} ${CONAN_LIBS_SPDLOG} ${CONAN_LIBS_SQLITE3} ${CONAN_LIBS_DATE})
+target_include_directories(base PRIVATE ${PROJECT_SOURCE_DIR}/include ${date_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${nlohmann_json_INCLUDE_DIR} ${SQLite_INCLUDE_DIR} ${asio_INCLUDE_DIR})
+target_link_libraries(base PRIVATE bbcrypt boost::boost spdlog::spdlog fmt::fmt nlohmann_json::nlohmann_json SQLite::SQLite3 LZ4::lz4_static date::date openssl::openssl ZLIB::ZLIB)
 target_link_libraries(base PUBLIC bbcrypt)

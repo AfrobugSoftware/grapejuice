@@ -8,6 +8,8 @@ pof::base::error_category::error_category() {
 	m_messages[to_underlying(errc::no_data)] = "NO DATA IN BUFFER";
 	m_messages[to_underlying(errc::metadata_mismatch)] = "DATA IN ROW DOES NOT MATCH THE METADATA FOR DATA OBJECT";
 	m_messages[to_underlying(errc::no_database_hostname)] = "NO DATABASE HOSTNAME";
+	m_messages[to_underlying(errc::no_arguments)] = "NO ARGUMENTS IN STMT";
+	m_messages[to_underlying(errc::no_connection_avaliable)] = "NO CONNECTION AVAILABLE";
 
 }
 

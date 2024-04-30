@@ -28,6 +28,8 @@
 #include <shared_mutex>
 #include <chrono>
 #include <atomic>
+#include <set>
+#include <mutex>
 #include <condition_variable>
 
 #include "query.h"
@@ -45,12 +47,14 @@ namespace pof {
 		{
 		public:
 			using connection_t = boost::mysql::tcp_ssl_connection;
+			using conn_ptr = std::shared_ptr<connection_t>;
+
 			databasemysql(boost::asio::io_context& ios, boost::asio::ssl::context& ssl);
 
-			boost::asio::awaitable<std::error_code> connect(std::string hostname, 
+			boost::asio::awaitable<std::error_code> connect(conn_ptr conn, std::string hostname, 
 			std::string port,
 			std::string user, std::string pwd);
-			inline connection_t& connection() { return m_connection; }
+			inline std::shared_ptr<conn> connection();
 			//Adds a query to the queue
 			bool push(std::shared_ptr<pof::base::query<databasemysql>> query);
 
@@ -60,22 +64,39 @@ namespace pof {
 
 			//also closes 
 			void disconnect();
+			bool m_isconnected = false;
 
+			conn_ptr borrow();
+			void unborrow(conn_ptr conn);
 		private:
+			std::string hostname;
+			std::string port;
+			std::string user;
+			std::string pwd;
+
+			conn_ptr create();
+
+
+			//ref to the operating system fasilities
+			boost::asio::io_context& mIos;
+			boost::asio::ssl::context& mSsl;
+
 			std::shared_mutex m_querymut;
 			std::deque<std::shared_ptr<pof::base::query<databasemysql>>> m_queryque;
+			boost::asio::ip::tcp::resolver m_resolver;
 
 			std::atomic<bool> m_isrunning;
 			std::condition_variable mStmtConditionVarible;
 
-			boost::asio::steady_timer m_timer;
-			connection_t m_connection;
-			boost::asio::ip::tcp::resolver m_resolver;
+			
+
+			//connection pool
+			std::mutex m_mutex;
+			std::set<conn_ptr> m_borrowed;
+			std::list<conn_ptr> m_pool;
 		};
 
 		using dataquerybase = pof::base::query<databasemysql>;
-
-		template<typename... Args>
-		using datastmtquery = pof::base::querystmt<databasemysql, Args...>;
+		using datastmtquery = pof::base::querystmt<databasemysql>;
 	}
 };
