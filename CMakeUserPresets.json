@@ -4,7 +4,6 @@
         "conan": {}
     },
     "include": [
-        "C:\\Users\\zino.ferife\\sources\\grapejuice\\build\\build\\CMakePresets.json",
         "C:\\Users\\zino.ferife\\sources\\grapejuice\\build\\CMakePresets.json"
     ]
 }

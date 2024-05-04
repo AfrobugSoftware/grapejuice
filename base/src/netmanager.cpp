@@ -24,3 +24,213 @@ std::error_code pof::base::net_manager::setupssl()
 	m_ssl.set_verify_mode(net::ssl::verify_none);
 	return std::error_code();
 }
+
+http::response<http::string_body> pof::base::net_manager::bad_request(std::string_view why)
+{
+	http::response<http::string_body> res{ http::status::bad_request, 11 };
+	res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+	res.set(http::field::content_type, "text/html");
+	res.keep_alive(true);
+	res.body() = std::string(why);
+	res.prepare_payload();
+	return res;
+}
+
+http::response<http::string_body> pof::base::net_manager::server_error(std::string_view target, std::string_view what)
+{
+	http::response<http::string_body> res{ http::status::internal_server_error, 11 };
+	res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+	res.set(http::field::content_type, "text/html");
+	res.keep_alive(true);
+	res.body() = "An error occurred: '" + std::string(what) + "'";
+	res.prepare_payload();
+	return res;
+}
+
+void pof::base::net_manager::run()
+{
+	boost::make_shared<listener>(*this, m_io, m_endpoint)->run();
+}
+
+void pof::base::net_manager::add_route(const std::string& target, callback&& cb)
+{
+	if (target.empty()) return;
+	m_router.insert(target, std::forward<callback>(cb));
+}
+
+void pof::base::net_manager::listener::fail(beast::error_code ec, char const* what)
+{
+	// Don't report on canceled operations
+	if (ec == net::error::operation_aborted)
+		return;
+	spdlog::error("Listner error :{}", what);
+}
+
+void pof::base::net_manager::listener::on_accept(beast::error_code ec, tcp::socket socket)
+{
+	if (ec) return fail(ec, "accept");
+
+	//lunch a session
+	boost::make_shared<httpsession>(manager,std::move(socket))->run();
+
+	//schelde another accept
+	 // The new connection gets its own strand
+	acceptor_.async_accept(net::make_strand(ioc_),
+		beast::bind_front_handler(&listener::on_accept, shared_from_this()));
+}
+
+pof::base::net_manager::listener::listener(net_manager& man,net::io_context& ioc, tcp::endpoint endpoint)
+: manager(man), ioc_(ioc)
+, acceptor_(ioc){
+	beast::error_code ec;
+
+	// Open the acceptor
+	acceptor_.open(endpoint.protocol(), ec);
+	if (ec){
+		fail(ec, "open");
+		return;
+	}
+	// Allow address reuse
+	acceptor_.set_option(net::socket_base::reuse_address(true), ec);
+	if (ec){
+		fail(ec, "set_option");
+		return;
+	}
+	// Bind to the server address
+	acceptor_.bind(endpoint, ec);
+	if (ec) {
+		fail(ec, "bind");
+		return;
+	}
+	// Start listening for connections
+	acceptor_.listen(net::socket_base::max_listen_connections, ec);
+	if (ec){
+		fail(ec, "listen");
+		return;
+	}
+}
+
+void pof::base::net_manager::listener::run()
+{
+	// The new connection gets its own strand
+	acceptor_.async_accept( net::make_strand(ioc_), 
+		beast::bind_front_handler(&listener::on_accept,
+			shared_from_this()));
+}
+
+void pof::base::net_manager::httpsession::fail(beast::error_code ec, char const* what)
+{
+	// Don't report on canceled operations
+	if (ec == net::error::operation_aborted)
+		return;
+	spdlog::error("httpsession error :{} {}", what, ec.message());
+}
+
+void pof::base::net_manager::httpsession::do_read()
+{
+	parser.emplace();
+	parser->body_limit(10000);
+	stream_.expires_after(std::chrono::seconds(30));
+
+	// Read a request
+	http::async_read(
+		stream_,
+		buffer_,
+		parser->get(),
+		beast::bind_front_handler(
+			&httpsession::on_read,
+			shared_from_this()));
+}
+
+void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::size_t)
+{
+	// This means they closed the connection
+	if (ec == http::error::end_of_stream){
+		stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+		return;
+	}
+	// Handle the error, if any
+	if (ec)
+		return fail(ec, "read");
+
+	auto& req = parser->get();
+	const auto& target = req.target();
+	
+	auto rpath = boost::urls::parse_path(target);
+	if (!rpath) {
+		auto res = manager.bad_request("illegal request taget");
+		auto self = shared_from_this();
+		using response_type = typename std::decay<decltype(res)>::type;
+		auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
+		http::async_write(stream_, *sp,
+			[self, sp](
+				beast::error_code ec, std::size_t bytes)
+			{
+				self->on_write(ec, bytes, sp->need_eof());
+			});
+		return;
+	}
+
+	boost::urls::matches m;
+	auto found = manager.m_router.find(rpath.value(), m);
+	if (!found) {
+		http::response<http::string_body> res{ http::status::not_found, 11 };
+
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "text/html");
+		res.keep_alive(true);
+
+		res.body() = "The resource '" + std::string(target) + "' was not found.";
+		res.prepare_payload();
+
+		using response_type = typename std::decay<decltype(res)>::type;
+		auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
+		auto self = shared_from_this();
+		http::async_write(stream_, *sp,
+			[self, sp](
+				beast::error_code ec, std::size_t bytes)
+			{
+				self->on_write(ec, bytes, sp->need_eof());
+			});
+	}
+	else {
+		auto res = (*found)(parser->get(), m);
+		using response_type = typename std::decay<decltype(res)>::type;
+		auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
+		auto self = shared_from_this();
+		http::async_write(stream_, *sp,
+			[self, sp](
+				beast::error_code ec, std::size_t bytes)
+			{
+				self->on_write(ec, bytes, sp->need_eof());
+		});
+	}
+}
+
+void pof::base::net_manager::httpsession::on_write(beast::error_code ec, std::size_t, bool close)
+{
+	// Handle the error, if any
+	if (ec)
+		return fail(ec, "write");
+
+	if (close)
+	{
+		// This means we should close the connection, usually because
+		// the response indicated the "Connection: close" semantic.
+		stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+		return;
+	}
+
+	// Read another request
+	do_read();
+}
+
+pof::base::net_manager::httpsession::httpsession(net_manager& man, tcp::socket&& socket)
+: manager(man), stream_(std::move(socket)){
+
+}
+
+void pof::base::net_manager::httpsession::run()
+{
+	do_read(); //begin the reading
+}

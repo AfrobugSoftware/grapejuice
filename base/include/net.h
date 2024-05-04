@@ -81,7 +81,7 @@ namespace this_coro = net::this_coro;
 
 using namespace std::literals::chrono_literals;
 using namespace std::literals::string_literals;
-#define PHARMAOFFICE_USER_AGENT_STRING "pharmaoffice_1"
+#define USER_AGENT_STRING "grapejuice"
 
 namespace pof {
 	namespace base {
@@ -246,7 +246,7 @@ namespace pof {
 					m_req.method(verb);
 					m_req.target(target.c_str());
 					m_req.set(http::field::host, host.c_str());
-					m_req.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+					m_req.set(http::field::user_agent, USER_AGENT_STRING);
 					m_req.set(http::field::content_length, std::to_string(body.size()));
 					m_req.body() = body;
 				}
@@ -258,7 +258,7 @@ namespace pof {
 					req_.version(version);
 					req_.target(target.c_str());
 					req_.set(http::field::host, host.c_str());
-					req_.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+					req_.set(http::field::user_agent, USER_AGENT_STRING);
 					req_.set(http::field::content_length, std::to_string(req_.body().size()));
 					m_req = std::move(req_);
 
@@ -269,7 +269,7 @@ namespace pof {
 					m_req.method(verb);
 					m_req.target(target.c_str());
 					m_req.set(http::field::host, host.c_str());
-					m_req.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+					m_req.set(http::field::user_agent, USER_AGENT_STRING);
 				}
 				m_req.prepare_payload();
 				//ignore all other bodies for now
@@ -448,7 +448,7 @@ namespace pof {
 						m_req.method(verb);
 						m_req.target(target.c_str());
 						m_req.set(http::field::host, host.c_str());
-						m_req.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+						m_req.set(http::field::user_agent, USER_AGENT_STRING);
 						m_req.set(http::field::content_length, std::to_string(body.size()));
 
 						m_req.body() = body;
@@ -462,7 +462,7 @@ namespace pof {
 						req_.version(version);
 						req_.target(target.c_str());
 						req_.set(http::field::host, host.c_str());
-						req_.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+						req_.set(http::field::user_agent,USER_AGENT_STRING);
 						req_.set(http::field::content_length, std::to_string(req_.body().size()));
 						m_req = std::move(req_);
 						m_req.prepare_payload();
@@ -474,14 +474,14 @@ namespace pof {
 						m_req.method(verb);
 						m_req.target(target.c_str());
 						m_req.set(http::field::host, host.c_str());
-						m_req.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+						m_req.set(http::field::user_agent, USER_AGENT_STRING);
 					}
 					else if constexpr (std::is_same_v<req_body, http::vector_body>) {
 						m_req.version(version);
 						m_req.method(verb);
 						m_req.target(target.c_str());
 						m_req.set(http::field::host, host.c_str());
-						m_req.set(http::field::user_agent, PHARMAOFFICE_USER_AGENT_STRING);
+						m_req.set(http::field::user_agent, USER_AGENT_STRING);
 						m_req.set(http::field::content_type, "application/bin"s);
 						m_req.set(http::field::content_length, std::to_string(body.size()));
 

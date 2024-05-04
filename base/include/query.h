@@ -382,8 +382,8 @@ namespace pof {
 									case boost::mysql::column_type::char_:
 									case boost::mysql::column_type::varchar:
 									case boost::mysql::column_type::text:
-									case boost::mysql::column_type::enum_:
-									case boost::mysql::column_type::set:
+									//case boost::mysql::column_type::enum_:
+									//case boost::mysql::column_type::set:
 									case boost::mysql::column_type::json:
 										v[i] = pof::base::data::text_t(row.at(i).as_string());
 										break;

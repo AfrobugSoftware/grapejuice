@@ -21,6 +21,7 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/base)
 
 add_executable(grapejuice ${incs} ${srcs}) 
 target_include_directories(grapejuice PUBLIC ${Crow_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${nlohmann_json_INCLUDE_DIR} ${SQLite_INCLUDE_DIR} ${date_INCLUDE_DIR} ${asio_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/base/include ${PROJECT_SOURCE_DIR}/include)
+target_link_directories(grapejuice PUBLIC ${BASE_LIB_DIR})
 target_link_libraries(grapejuice PUBLIC base boost::boost spdlog::spdlog fmt::fmt nlohmann_json::nlohmann_json SQLite::SQLite3 LZ4::lz4_static date::date openssl::openssl ZLIB::ZLIB Crow::Crow)
 
 if(CMAKE_SYSTEM MATCHES Linux)

@@ -43,18 +43,21 @@ using namespace std::literals::chrono_literals;
 constexpr auto tuple_awaitable = boost::asio::as_tuple(boost::asio::use_awaitable);
 namespace pof {
 	namespace base {
-		class databasemysql : private boost::noncopyable
+		class databasemysql : private boost::noncopyable, public std::enable_shared_from_this<databasemysql>
 		{
 		public:
+			constexpr static int connection_max = 10;
 			using connection_t = boost::mysql::tcp_ssl_connection;
 			using conn_ptr = std::shared_ptr<connection_t>;
 
 			databasemysql(boost::asio::io_context& ios, boost::asio::ssl::context& ssl);
+			bool create_pool();
 
 			boost::asio::awaitable<std::error_code> connect(conn_ptr conn, std::string hostname, 
 			std::string port,
 			std::string user, std::string pwd);
-			inline std::shared_ptr<conn> connection();
+
+			bool connect();
 			//Adds a query to the queue
 			bool push(std::shared_ptr<pof::base::query<databasemysql>> query);
 
@@ -68,6 +71,10 @@ namespace pof {
 
 			conn_ptr borrow();
 			void unborrow(conn_ptr conn);
+
+			void set_params(const std::string& host, const std::string& sport, const std::string& suser, const std::string& spwd);
+			void use_database(const std::string& name);
+			void create_database(const std::string& name);
 		private:
 			std::string hostname;
 			std::string port;

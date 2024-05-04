@@ -3,7 +3,7 @@ pkg/boost:shared=True
 
 
 [requires]
-boost/1.83.0
+boost/1.84.0
 fmt/10.0.0
 spdlog/1.11.0
 zlib/1.2.13

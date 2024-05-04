@@ -1,50 +1,65 @@
 #include <iostream>
-#include <crow.h>
 #include <date/date.h>
 #include <spdlog/spdlog.h>
 #include <format>
 #include <filesystem>
 #include <fstream>
+#include <boost/asio/streambuf.hpp>
 
+#include "Application.h"
+#include "packages.h"
 
 namespace fs = std::filesystem;
 int main(int argc, char** argv)
 {
     std::cout << "grapejuice 1.0.0" << std::endl;
-    crow::SimpleApp app;
+ 
+    auto app = grape::GetApp();
+    app->route("/about", [](http::request<http::dynamic_body> req, 
+        boost::urls::matches& m) -> http::response<http::dynamic_body> {
+            http::response<http::dynamic_body> res{ http::status::ok, 11 };
 
-    CROW_ROUTE(app, "/")([]() {
-        spdlog::info("Route page reached");
-        return "hello world";
+           res.set(http::field::server, USER_AGENT_STRING);
+           res.set(http::field::content_type, "text/html");
+           res.keep_alive(req.keep_alive());
+
+
+           http::dynamic_body::value_type value;
+           const auto data = "This is grape juice"s;
+           auto buffer = value.prepare(data.size());
+           boost::asio::buffer_copy(buffer, boost::asio::buffer(data));
+           value.commit(data.size());
+
+           res.body() = value;
+           res.prepare_payload();
+           return res;
     });
 
-    CROW_ROUTE(app, "/form")([]() {
-        auto page = crow::mustache::load_text("forms.html");
-        return page;
-    });
+    app->route("/about/{path}/{second}", [](http::request<http::dynamic_body> req, boost::urls::matches& m)
+        ->http::response<http::dynamic_body> {
+            auto p = m["path"];
+            auto a = m["second"];
+            http::response<http::dynamic_body> res{ http::status::ok, 11 };
 
-    CROW_ROUTE(app, "/example")([]() {
-        auto page = crow::mustache::load_text("example.html");
-        return page;
-    });
+            res.set(http::field::server, USER_AGENT_STRING);
+            res.set(http::field::content_type, "text/html");
+            res.keep_alive(req.keep_alive());
 
-    CROW_ROUTE(app, "/<string>")([](const std::string& str) {
-        std::string filepath= fmt::format("{}.html", str);
-        auto page = crow::mustache::load_text(filepath);
-        return page;
-    });
+            http::dynamic_body::value_type value;
+            const auto data = "This is grape juice: "s + std::string(p) + " " + std::string(a);
+            auto buffer = value.prepare(data.size());
+            boost::asio::buffer_copy(buffer, boost::asio::buffer(data));
+            value.commit(data.size());
 
-    CROW_ROUTE(app, "/img/<string>")([](const std::string& str) {
-        crow::response res;
-        std::filesystem::path path = fs::current_path() / "templates" / "img" / str;
-    
-        res.set_static_file_info_unsafe(path.string());
-        return res;
-    });
+            res.body() = value;
+            res.prepare_payload();
+            return res;
+     });
 
-
-
-
-    app.port(18080).multithreaded().run();
+    app->Init();
+    app->Run();
+    int a;
+    std::cin >> a;
+    app->Exit();
     return 0;
 }
