@@ -1,7 +1,7 @@
 #include "Application.h"
 
 grape::Application::Application(const std::string& servername)
-{
+: mServerName(servername){
 	mDatabase = std::make_shared<pof::base::databasemysql>(mNetManager.io(), mNetManager.ssl());
 }
 
@@ -24,6 +24,9 @@ bool grape::Application::Init()
 	mDatabase->create_database("grapejuice");
 	mDatabase->use_database("grapejuice"s);
 
+	//
+	CreateTable(); //creates the tables
+
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
 	return false;
 }
@@ -39,6 +42,12 @@ bool grape::Application::Exit()
 	mDatabase->disconnect();
 	mNetManager.stop();
 	return false;
+}
+
+void grape::Application::CreateTable()
+{
+	mAccountManager.CreateAccountTable();
+	mAccountManager.CreateSessionTable();
 }
 
 void grape::Application::route(const std::string& target, pof::base::net_manager::callback&& endpoint)

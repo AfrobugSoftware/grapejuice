@@ -5,6 +5,8 @@
 
 #include "netmanager.h"
 #include "databasemysql.h"
+
+#include "AccountManager.h"
 namespace grape {
 	class Application : public boost::noncopyable, 
 		public std::enable_shared_from_this<Application>
@@ -17,12 +19,15 @@ namespace grape {
 		virtual bool Run();
 		virtual bool Exit();
 
+		void CreateTable();
 		void route(const std::string& target,
 			pof::base::net_manager::callback&& endpoint);
-		std::shared_ptr<pof::base::databasemysql> mDatabase;
 
+		std::string mServerName; 
+		std::shared_ptr<pof::base::databasemysql> mDatabase;
 		std::uint16_t mPort = 8080;
 		pof::base::net_manager mNetManager;
+		grape::AccountManager mAccountManager;
 	};
 
 	extern std::shared_ptr<Application> GetApp();

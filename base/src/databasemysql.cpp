@@ -52,6 +52,7 @@ bool pof::base::databasemysql::connect()
 	boost::mysql::handshake_params params{ user, pwd };
 	boost::mysql::error_code ec;
 	boost::mysql::diagnostics d;
+	m_isconnected = false;
 	for (auto iter = m_pool.begin(); iter != m_pool.end(); iter++) {
 		(*iter)->connect(*results.begin(), params, ec, d);
 		if (ec) {
@@ -59,6 +60,7 @@ bool pof::base::databasemysql::connect()
 		}
 	}
 	if (!m_pool.empty()) m_isconnected = true;
+	return m_isconnected;
 }
 
 bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemysql>> query)
@@ -157,12 +159,11 @@ pof::base::databasemysql::conn_ptr pof::base::databasemysql::borrow()
 			return nullptr;
 		}
 	}
-	else {
-		auto sp = m_pool.front();
-		m_pool.pop_front();
-		m_borrowed.insert(sp);
-		return sp;
-	}
+
+	auto sp = m_pool.front();
+	m_pool.pop_front();
+	m_borrowed.insert(sp);
+	return sp;
 }
 
 void pof::base::databasemysql::unborrow(conn_ptr conn)
@@ -182,9 +183,15 @@ void pof::base::databasemysql::set_params(const std::string& host, const std::st
 
 void pof::base::databasemysql::use_database(const std::string& name)
 {
-	auto qptr2 = std::make_shared<pof::base::query<pof::base::databasemysql>>(shared_from_this());
-	qptr2->m_sql = fmt::format("USE {};", name);
-	push(qptr2);
+	auto sql = std::format("USE {};", name);
+	boost::mysql::results result;
+	for (auto iter = m_pool.begin(); iter != m_pool.end(); iter++) {
+		(*iter)->query(sql, result);
+		if (!result.has_value()) {
+			(*iter)->close();
+			m_pool.erase(iter);
+		}
+	}
 }
 
 void pof::base::databasemysql::create_database(const std::string& name)
