@@ -15,6 +15,8 @@ int main(int argc, char** argv)
     std::cout << "grapejuice 1.0.0" << std::endl;
  
     auto app = grape::GetApp();
+    app->Init();
+
     app->route("/about", [](http::request<http::dynamic_body> req, 
         boost::urls::matches& m) -> http::response<http::dynamic_body> {
             http::response<http::dynamic_body> res{ http::status::ok, 11 };
@@ -46,7 +48,7 @@ int main(int argc, char** argv)
             res.keep_alive(req.keep_alive());
 
             http::dynamic_body::value_type value;
-            const auto data = "This is grape juice: "s + std::string(p) + " " + std::string(a);
+            const auto data = "This is grape juice: "s + std::string(p) + " " + std::string();
             auto buffer = value.prepare(data.size());
             boost::asio::buffer_copy(buffer, boost::asio::buffer(data));
             value.commit(data.size());
@@ -56,7 +58,6 @@ int main(int argc, char** argv)
             return res;
      });
 
-    app->Init();
     app->Run();
     int a;
     std::cin >> a;

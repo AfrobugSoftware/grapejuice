@@ -1,6 +1,7 @@
 #pragma once
 #include "net.h"
 #include "errc.h"
+#include <boost/asio/signal_set.hpp>
 
 #include <boost/noncopyable.hpp>
 #include <boost/optional.hpp>
@@ -68,7 +69,6 @@ namespace pof
 
 			http::response<http::string_body> bad_request(std::string_view target);
 			http::response<http::string_body> server_error(std::string_view target, std::string_view what);
-			http::response<http::string_body> not_found(std::string_view target);
 
 			void run();
 
@@ -79,6 +79,7 @@ namespace pof
 		private:
 			std::unique_ptr<net::executor_work_guard<boost::asio::io_context::executor_type>> m_workgaurd;
 			std::shared_ptr<listener> m_listener;
+			std::shared_ptr<net::signal_set> m_signals;
 			boost::asio::ip::tcp::endpoint m_endpoint;
 
 			boost::urls::router<callback> m_router;

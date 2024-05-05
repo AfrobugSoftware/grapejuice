@@ -50,6 +50,15 @@ http::response<http::string_body> pof::base::net_manager::server_error(std::stri
 void pof::base::net_manager::run()
 {
 	boost::make_shared<listener>(*this, m_io, m_endpoint)->run();
+	m_signals = std::make_shared<net::signal_set>(m_io, SIGINT, SIGTERM);
+	m_signals->async_wait(
+		[&](boost::system::error_code const&, int)
+		{
+			// Stop the io_context. This will cause run()
+			// to return immediately, eventually destroying the
+			// io_context and any remaining handlers in it.
+			m_io.stop();
+		});
 }
 
 void pof::base::net_manager::add_route(const std::string& target, callback&& cb)

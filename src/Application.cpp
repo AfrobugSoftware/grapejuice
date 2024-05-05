@@ -2,8 +2,6 @@
 
 grape::Application::Application(const std::string& servername)
 {
-	mRouteApp = std::make_shared<crow::SimpleApp>();
-	mRouteApp->server_name(servername);
 	mDatabase = std::make_shared<pof::base::databasemysql>(mNetManager.io(), mNetManager.ssl());
 }
 
@@ -20,14 +18,10 @@ bool grape::Application::Init()
 		"Topdollar123"s
 	);
 
-	spdlog::info("Creating pool");
 	mDatabase->create_pool();
-	spdlog::info("Connecting pool");
 	mDatabase->connect();
 
-	spdlog::info("Creating database");
 	mDatabase->create_database("grapejuice");
-	spdlog::info("Using database");
 	mDatabase->use_database("grapejuice"s);
 
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
@@ -43,7 +37,6 @@ bool grape::Application::Run()
 bool grape::Application::Exit()
 {
 	mDatabase->disconnect();
-	mRouteApp->stop();
 	mNetManager.stop();
 	return false;
 }
