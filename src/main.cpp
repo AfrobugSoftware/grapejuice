@@ -17,7 +17,7 @@ int main(int argc, char** argv)
     auto app = grape::GetApp();
     app->Init();
 
-    app->route("/about", [](http::request<http::dynamic_body> req, 
+    app->route("/about", [](http::request<http::dynamic_body>& req, 
         boost::urls::matches& m) -> http::response<http::dynamic_body> {
             http::response<http::dynamic_body> res{ http::status::ok, 11 };
 
@@ -37,7 +37,7 @@ int main(int argc, char** argv)
            return res;
     });
 
-    app->route("/about/{path}/{second}", [](http::request<http::dynamic_body> req, boost::urls::matches& m)
+    app->route("/about/{path}/{second}", [&](http::request<http::dynamic_body>& req, boost::urls::matches& m)
         ->http::response<http::dynamic_body> {
             auto p = m["path"];
             auto a = m["second"];

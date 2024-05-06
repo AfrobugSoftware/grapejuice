@@ -109,7 +109,6 @@ boost::asio::awaitable<void> pof::base::databasemysql::runquery()
 			//execute the query
 			co_await(*dq)();
 			unborrow(dq->m_connection);
-			dq->m_connection = nullptr;
 			co_return;
 		}
 		catch (...) {

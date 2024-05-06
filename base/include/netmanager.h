@@ -22,7 +22,9 @@ namespace pof
 		class net_manager : private boost::noncopyable
 		{
 		public:
-			using callback = std::function<http::response<http::dynamic_body>(http::request<http::dynamic_body>, boost::urls::matches&)>;
+			using callback = std::function<http::response<http::dynamic_body>(http::request<http::dynamic_body>&, boost::urls::matches&)>;
+			using req_t = http::request<http::dynamic_body>;
+			using res_t = http::response<http::dynamic_body>;
 			class httpsession : public boost::enable_shared_from_this<httpsession>
 			{
 				net_manager& manager;
@@ -67,8 +69,8 @@ namespace pof
 			inline net::ssl::context& ssl() { return m_ssl; }
 
 
-			http::response<http::string_body> bad_request(std::string_view target);
-			http::response<http::string_body> server_error(std::string_view target, std::string_view what);
+			res_t bad_request(const std::string& err);
+			res_t server_error(const std::string& err);
 
 			void run();
 
@@ -87,6 +89,7 @@ namespace pof
 			net::ssl::context m_ssl;
 			std::thread m_thread;
 
+			std::vector<std::thread> m_threadvec;
 		};
 	};
 };

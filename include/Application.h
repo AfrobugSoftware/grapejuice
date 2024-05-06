@@ -1,6 +1,8 @@
 #pragma once
 #include <boost/noncopyable.hpp>
 #include <memory>
+#include <nlohmann/json.hpp>
+#include <filesystem>
 
 
 #include "netmanager.h"
@@ -8,6 +10,8 @@
 
 #include "AccountManager.h"
 namespace grape {
+	namespace js = nlohmann;
+	namespace fs = std::filesystem;
 	class Application : public boost::noncopyable, 
 		public std::enable_shared_from_this<Application>
 	{
@@ -19,6 +23,7 @@ namespace grape {
 		virtual bool Run();
 		virtual bool Exit();
 
+		void CreateRoutes();
 		void CreateTable();
 		void route(const std::string& target,
 			pof::base::net_manager::callback&& endpoint);

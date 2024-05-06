@@ -26,6 +26,7 @@ bool grape::Application::Init()
 
 	//
 	CreateTable(); //creates the tables
+	CreateRoutes();
 
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
 	return false;
@@ -42,6 +43,11 @@ bool grape::Application::Exit()
 	mDatabase->disconnect();
 	mNetManager.stop();
 	return false;
+}
+
+void grape::Application::CreateRoutes()
+{
+	mAccountManager.SetRoutes();
 }
 
 void grape::Application::CreateTable()

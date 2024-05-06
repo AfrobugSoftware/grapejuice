@@ -225,8 +225,7 @@ namespace pof {
 				base_t::m_sql = sql;
 			}
 			virtual ~querystmt() {
-				auto& conn = base_t::m_manager->connection();
-				conn.close_statement(stmt); //blocks might be a bottle neck
+				if(stmt.valid()) base_t::m_connection->close_statement(stmt); //blocks might be a bottle neck
 			}
 			virtual boost::asio::awaitable<void> operator()() override {
 				auto this_ = base_t::shared_t::shared_from_this(); //hold till we leave the coroutine
@@ -263,7 +262,7 @@ namespace pof {
 					for (auto& arg : m_arguments) {
 						boost::mysql::results result;
 						timer.expires_after(std::chrono::minutes(1));
-						auto comp = co_await(conn.async_execute(stmt.bind(arg.begin(), arg.end()), result, base_t::m_diag, base_t::tuple_awaitable) ||
+						auto comp = co_await(conn->async_execute(stmt.bind(arg.begin(), arg.end()), result, base_t::m_diag, base_t::tuple_awaitable) ||
 							timer.async_wait());
 						switch (comp.index())
 						{

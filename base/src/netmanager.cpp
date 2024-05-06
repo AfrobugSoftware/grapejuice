@@ -6,15 +6,21 @@ pof::base::net_manager::net_manager()
 	if (ec) {
 		
 	}
+	
 	m_workgaurd = std::make_unique<net::executor_work_guard<net::io_context::executor_type>>(m_io.get_executor());
-	m_thread = std::move(std::thread{static_cast<size_t(net::io_context::*)()>(&net::io_context::run), std::ref(m_io)});
+	m_threadvec.reserve(std::thread::hardware_concurrency());
+	for (int i = 0; i < std::thread::hardware_concurrency() - 1; i++) {
+		m_threadvec.emplace_back(std::move(std::thread{ static_cast<size_t(net::io_context::*)()>(&net::io_context::run), std::ref(m_io) }));
+	}	
 }
 
 bool pof::base::net_manager::stop()
 {
 	m_workgaurd.reset(nullptr);
 	m_io.stop();
-	m_thread.join();
+	for(auto& t : m_threadvec)
+		t.join();
+	m_threadvec.clear();
 	return true;
 }
 
@@ -25,24 +31,41 @@ std::error_code pof::base::net_manager::setupssl()
 	return std::error_code();
 }
 
-http::response<http::string_body> pof::base::net_manager::bad_request(std::string_view why)
+
+pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::string& err)
 {
-	http::response<http::string_body> res{ http::status::bad_request, 11 };
-	res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+	http::response<http::dynamic_body> res{ http::status::bad_request, 11 };
+
+	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "text/html");
 	res.keep_alive(true);
-	res.body() = std::string(why);
+
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(err.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
+	value.commit(err.size());
+
+
+	res.body() = value;
 	res.prepare_payload();
 	return res;
 }
 
-http::response<http::string_body> pof::base::net_manager::server_error(std::string_view target, std::string_view what)
+pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::string& err)
 {
-	http::response<http::string_body> res{ http::status::internal_server_error, 11 };
-	res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+	http::response<http::dynamic_body> res{ http::status::internal_server_error, 11 };
+
+	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "text/html");
 	res.keep_alive(true);
-	res.body() = "An error occurred: '" + std::string(what) + "'";
+
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(err.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
+	value.commit(err.size());
+
+
+	res.body() = value;
 	res.prepare_payload();
 	return res;
 }
