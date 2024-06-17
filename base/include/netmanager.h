@@ -71,6 +71,7 @@ namespace pof
 
 			res_t bad_request(const std::string& err);
 			res_t server_error(const std::string& err);
+			res_t not_found(const std::string& err);
 
 			void run();
 

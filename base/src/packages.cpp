@@ -2,7 +2,7 @@
 static constexpr auto const flags = boost::archive::no_header | boost::archive::no_tracking |boost::archive::no_xml_tag_checking;
 
 pof::base::pack_t pof::base::packer::operator()() const {
-	std::vector<char> compressed;
+	std::vector<std::uint8_t> compressed;
 
 	boost::iostreams::filtering_ostream fos;
 	fos.push(boost::iostreams::bzip2_compressor());
@@ -15,7 +15,7 @@ pof::base::pack_t pof::base::packer::operator()() const {
 
 void pof::base::unpacker::operator()(const pack_t& package)
 {
-	boost::iostreams::array_source as{ package.data(), package.size()};
+	boost::iostreams::basic_array_source<std::uint8_t> as{ package.data(), package.size()};
 	boost::iostreams::filtering_istream ifs;
 	ifs.push(boost::iostreams::bzip2_decompressor());
 	ifs.push(as);

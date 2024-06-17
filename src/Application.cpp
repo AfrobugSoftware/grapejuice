@@ -1,4 +1,6 @@
 #include "Application.h"
+static std::once_flag g_flag;
+static std::shared_ptr<grape::Application> app;
 
 grape::Application::Application(const std::string& servername)
 : mServerName(servername){
@@ -28,7 +30,13 @@ bool grape::Application::Init()
 	CreateTable(); //creates the tables
 	CreateRoutes();
 
+	//connect update signal
+	mUpdateSignal.connect(std::bind_front(&grape::AccountManager::UpdateSessions,
+		&mAccountManager));
+
+
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
+	mUpdateTimer = boost::asio::steady_timer(mNetManager.io().get_executor(), 30s);
 	return false;
 }
 
@@ -40,6 +48,7 @@ bool grape::Application::Run()
 
 bool grape::Application::Exit()
 {
+	mUpdateTimer->cancel();
 	mDatabase->disconnect();
 	mNetManager.stop();
 	return false;
@@ -53,7 +62,6 @@ void grape::Application::CreateRoutes()
 void grape::Application::CreateTable()
 {
 	mAccountManager.CreateAccountTable();
-	mAccountManager.CreateSessionTable();
 }
 
 void grape::Application::route(const std::string& target, pof::base::net_manager::callback&& endpoint)
@@ -62,8 +70,33 @@ void grape::Application::route(const std::string& target, pof::base::net_manager
 		std::forward<pof::base::net_manager::callback>(endpoint));
 }
 
+void grape::Application::OnTimeout(boost::system::error_code ec)
+{
+	mUpdateSignal();
+	if (mUpdateTimer){
+		mUpdateTimer->expires_from_now(30s);
+		mUpdateTimer->async_wait(std::bind_front(&grape::Application::OnTimeout, this));
+	}
+}
+
+bool grape::VerifyEmail(const std::string& email)
+{
+	const std::regex rex(R"(^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$)");
+	return (std::regex_match(email, rex));
+}
+
+bool grape::VerifyPhonenumber(const std::string& phone)
+{
+	const std::regex pattern("(0|91)?[6-9][0-9]{9}");
+	return (std::regex_match(phone, pattern));
+}
+
 std::shared_ptr<grape::Application> grape::GetApp()
 {
-	static std::shared_ptr<Application> app = std::make_shared<Application>(std::string("grapejuice"));
+	std::call_once(g_flag, [&]() {
+		if (!app) {
+		app = std::make_shared<grape::Application>("grapejuice"s);
+		}
+	});
 	return app;
 }

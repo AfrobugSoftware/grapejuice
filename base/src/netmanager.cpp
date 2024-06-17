@@ -26,9 +26,24 @@ bool pof::base::net_manager::stop()
 
 std::error_code pof::base::net_manager::setupssl()
 {
+	auto fp = std::filesystem::current_path() / "certs" / "certs.pem";
+
 	//this would change
-	m_ssl.set_verify_mode(net::ssl::verify_none);
-	return std::error_code();
+	boost::system::error_code ec;
+
+
+	m_ssl.set_default_verify_paths();
+	m_ssl.set_verify_mode(net::ssl::verify_peer);
+
+	//when I get a certificate
+	m_ssl.use_certificate_chain_file(fp.string());
+	m_ssl.use_rsa_private_key_file(fp.string(), boost::asio::ssl::context::pem);
+	m_ssl.set_password_callback([](std::size_t len, boost::asio::ssl::context_base::password_purpose pp) -> std::string {
+			
+	}, ec);
+
+
+	return ec;
 }
 
 
@@ -54,6 +69,25 @@ pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::str
 pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::string& err)
 {
 	http::response<http::dynamic_body> res{ http::status::internal_server_error, 11 };
+
+	res.set(http::field::server, USER_AGENT_STRING);
+	res.set(http::field::content_type, "text/html");
+	res.keep_alive(true);
+
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(err.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
+	value.commit(err.size());
+
+
+	res.body() = value;
+	res.prepare_payload();
+	return res;
+}
+
+pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::string& err)
+{
+	http::response<http::dynamic_body> res{ http::status::not_found, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "text/html");

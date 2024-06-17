@@ -287,7 +287,7 @@ namespace pof
                 ar >> colsize; //save for later
                 //metadata size
                 metadata.resize(colsize);
-                std::uint8_t k;
+                std::uint8_t k = 0;
                 for (int i = 0; i < metadata.size(); i++) {
                     ar >> k;
                     metadata[i] = static_cast<kind>(k);

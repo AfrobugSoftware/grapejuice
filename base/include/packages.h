@@ -20,7 +20,7 @@ namespace ar = boost::archive;
 namespace pof
 {
 	namespace base {
-		using pack_t = std::vector<char>;
+		using pack_t = std::vector<std::uint8_t>;
 		class packer {
 		public:
 			packer(const pof::base::data& data) : m_data(data) {}
