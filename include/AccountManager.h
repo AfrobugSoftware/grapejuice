@@ -51,6 +51,9 @@ namespace grape
 		pof::base::net_manager::res_t GetActiveSession(pof::base::net_manager::req_t& req,
 			boost::urls::matches& match);
 
+		pof::base::net_manager::res_t UpdateUserAccount(pof::base::net_manager::req_t& req,
+			boost::urls::matches& match);
+
 		bool VerifySession(const boost::uuids::uuid& aid, 
 			const boost::uuids::uuid& sid);
 		bool CheckUsername(const std::string& username);

@@ -54,7 +54,8 @@ void grape::AccountManager::SetRoutes()
 	auto app = grape::GetApp();
 	app->route("/account/signup", std::bind_front(&grape::AccountManager::OnSignUp, this));
 	app->route("/account/signin", std::bind_front(&grape::AccountManager::OnSignIn, this));
-	app->route("/account/signout", std::bind_front(&grape::AccountManager::OnSignIn, this));
+	app->route("/account/signout", std::bind_front(&grape::AccountManager::OnSignOut, this));
+	app->route("/account/updateaccount", std::bind_front(&grape::AccountManager::UpdateUserAccount, this));
 }
 
 
@@ -265,7 +266,7 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 		if (!req.has_content_length()) {
 			return app->mNetManager.bad_request("Expected a body");
 		}
-		size_t len = boost::lexical_cast<size_t>(req.at("content-length"));
+		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
 		auto& req_body = req.body();
 		std::string data;
 		data.resize(len);
@@ -296,6 +297,30 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignInFromSession(pof::ba
 pof::base::net_manager::res_t grape::AccountManager::GetActiveSession(pof::base::net_manager::req_t& req, boost::urls::matches& match)
 {
 	return pof::base::net_manager::res_t();
+}
+
+pof::base::net_manager::res_t grape::AccountManager::UpdateUserAccount(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+{
+	auto app = grape::GetApp();
+	try {
+		boost::string_view sidText = req["sessionID"];
+		boost::string_view accIDText = req["accountID"];
+		auto sid = boost::lexical_cast<boost::uuids::uuid>(sidText);
+		auto aid = boost::lexical_cast<boost::uuids::uuid>(accIDText);
+		if (!VerifySession(aid, sid)) {
+			return app->mNetManager.bad_request(fmt::format("No active session for user: {}", accIDText));
+		}
+
+		auto& body = req.body();
+		auto str = body.cdata();
+		auto jsonData = js::json::parse(std::string(str.begin(), str.end()));
+
+
+	}
+	catch (std::exception& exp) {
+		return app->mNetManager.server_error(exp.what());
+	}
+
 }
 
 bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid)
