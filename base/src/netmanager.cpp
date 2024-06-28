@@ -1,7 +1,7 @@
 #include <netmanager.h>
 
 pof::base::net_manager::net_manager()
-	: m_ssl{boost::asio::ssl::context_base::sslv23_client}{
+	: m_ssl{boost::asio::ssl::context_base::sslv23_server}{
 	auto ec = setupssl();
 	if (ec) {
 		
@@ -52,13 +52,20 @@ pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::str
 	http::response<http::dynamic_body> res{ http::status::bad_request, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
-	res.set(http::field::content_type, "text/html");
+	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
 
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = err;
+
+
+	auto ret = obj.dump();
+
 	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(err.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
-	value.commit(err.size());
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
 
 
 	res.body() = value;
@@ -71,13 +78,20 @@ pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::st
 	http::response<http::dynamic_body> res{ http::status::internal_server_error, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
-	res.set(http::field::content_type, "text/html");
+	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
 
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = err;
+
+
+	auto ret = obj.dump();
+
 	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(err.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
-	value.commit(err.size());
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
 
 
 	res.body() = value;
@@ -90,13 +104,44 @@ pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::strin
 	http::response<http::dynamic_body> res{ http::status::not_found, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
-	res.set(http::field::content_type, "text/html");
+	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
 
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = err;
+
+
+	auto ret = obj.dump();
+
 	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(err.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(err));
-	value.commit(err.size());
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
+
+
+	res.body() = value;
+	res.prepare_payload();
+	return res;
+}
+
+pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::string& err)
+{
+	http::response<http::dynamic_body> res{ http::status::unauthorized, 11 };
+	res.set(http::field::server, USER_AGENT_STRING);
+	res.set(http::field::content_type, "application/json");
+	res.keep_alive(true);
+
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = err;
+
+
+	auto ret = obj.dump();
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
 
 
 	res.body() = value;
@@ -243,10 +288,14 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 		http::response<http::string_body> res{ http::status::not_found, 11 };
 
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "text/html");
+		res.set(http::field::content_type, "application/json");
 		res.keep_alive(true);
 
-		res.body() = "The resource '" + std::string(target) + "' was not found.";
+		js::json obj = js::json::object();
+		obj["result_status"] = "failed"s;
+		obj["result_message"] = "The resource '" + std::string(target) + "' was not found.";
+
+		res.body() = obj.dump();
 		res.prepare_payload();
 
 		using response_type = typename std::decay<decltype(res)>::type;

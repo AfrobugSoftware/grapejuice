@@ -57,11 +57,16 @@ bool grape::Application::Exit()
 void grape::Application::CreateRoutes()
 {
 	mAccountManager.SetRoutes();
+	mPharmacyManager.SetRoutes();
 }
 
 void grape::Application::CreateTable()
 {
 	mAccountManager.CreateAccountTable();
+	mPharmacyManager.CreatePharmacyTable();
+	mPharmacyManager.CreateBranchTable();
+	mPharmacyManager.CreateAddressTable();
+
 }
 
 void grape::Application::route(const std::string& target, pof::base::net_manager::callback&& endpoint)

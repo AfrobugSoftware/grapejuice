@@ -12,6 +12,8 @@
 #include "packages.h"
 
 #include "AccountManager.h"
+#include "PharmacyManager.h"
+
 namespace grape {
 	namespace js = nlohmann;
 	namespace fs = std::filesystem;
@@ -45,6 +47,8 @@ namespace grape {
 		std::uint16_t mPort = 8080;
 		pof::base::net_manager mNetManager;
 		grape::AccountManager mAccountManager;
+		grape::PharmacyManager mPharmacyManager;
+
 		boost::optional<boost::asio::steady_timer> mUpdateTimer = boost::none;
 	};
 

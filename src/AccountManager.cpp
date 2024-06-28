@@ -276,16 +276,52 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 		req_body.consume(len);
 
 		js::json jsonData = js::json::parse(data);
-		std::string username = jsonData["username"];
-		std::string accountId = jsonData["accountID"];
-		std::string sessionId = jsonData["sessionID"];
-		std::string pharmacyId = jsonData["pharmacy"];
+		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["accountID"]));
+		boost::uuids::uuid sessionId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["sessionID"]));
+		boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["pharmacyID"]));
 
-		auto signOutTime = pof::base::data::clock_t::now();
+		auto signOutTime = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(std::chrono::system_clock::now());
 
+		//do the sign out
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE accounts SET signout = ?, SET session_id = ? WHERE account_id = ?;)");
+		query->m_arguments = { {
+				boost::mysql::field(boost::mysql::datetime(signOutTime)),
+				boost::mysql::field(boost::mysql::blob(sessionId.begin(), sessionId.end())),
+				boost::mysql::field(boost::mysql::blob(accountId.begin(), accountId.end()))
+		}};
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto d = fut.get();
+
+
+		//remove from active accounts
+		mActiveSessions.erase(sessionId);
+
+		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "application/json");
+		res.keep_alive(req.keep_alive());
+
+		js::json jobj = js::json::object();
+		jobj["result_status"] = "Successful"s;
+		jobj["result_message"] = "Branch created sucessfully"s;
+
+		auto sendData = jobj.dump();
+		boost::beast::http::dynamic_body::value_type value{};
+		auto buffer = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buffer, boost::asio::buffer(sendData));
+		value.commit(sendData.size());
+
+		res.body() = std::move(value);
+		res.prepare_payload();
+		return res;
+	}
+	catch (const js::json::exception& jerr) {
+		return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (std::exception& ptr) {
-		
+		return app->mNetManager.server_error(ptr.what());
 	}
 }
 
@@ -325,7 +361,6 @@ pof::base::net_manager::res_t grape::AccountManager::UpdateUserAccount(pof::base
 
 bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid)
 {
-	auto app = grape::GetApp();
 	try {
 		boost::optional<pof::base::data::row_t> user = boost::none;
 		//this might block
@@ -333,7 +368,7 @@ bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const b
 			[&](const auto& v) {
 				user = v;
 			});
-		if (!found) return false;
+		if (!found && !user.has_value()) return false;
 		auto& v = user->first;
 		auto& usid = boost::variant2::get<boost::uuids::uuid>(v[SESSION_ID]);
 		auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(v[SESSION_START_TIME]);

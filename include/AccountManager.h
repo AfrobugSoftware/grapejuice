@@ -4,6 +4,7 @@
 #include "databasemysql.h"
 #include <boost/lexical_cast.hpp>
 #include <boost/unordered/concurrent_flat_map.hpp>
+#include <boost/chrono.hpp>
 
 namespace grape
 {
