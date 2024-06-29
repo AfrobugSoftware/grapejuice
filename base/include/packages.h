@@ -6,8 +6,8 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 
-#include <boost/serialization/vector.hpp>
 #include <sstream>
+#include <boost/serialization/vector.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
@@ -20,7 +20,7 @@ namespace ar = boost::archive;
 namespace pof
 {
 	namespace base {
-		using pack_t = std::vector<std::uint8_t>;
+		using pack_t = std::vector<char>;
 		class packer {
 		public:
 			packer(const pof::base::data& data) : m_data(data) {}

@@ -2,13 +2,16 @@
 
 #include "netmanager.h"
 #include "databasemysql.h"
+#include <../base/bcrypt/include/bcrypt.h>
+
 #include <boost/lexical_cast.hpp>
 #include <boost/unordered/concurrent_flat_map.hpp>
 #include <boost/chrono.hpp>
+#include <boost/noncopyable.hpp>
 
 namespace grape
 {
-	class AccountManager {
+	class AccountManager : public boost::noncopyable {
 	public:
 		enum : std::uint8_t {
 			PHARMACY_ID = 0,
@@ -60,6 +63,10 @@ namespace grape
 		bool CheckUsername(const std::string& username);
 
 		void UpdateSessions();
+
+		bool AuthuriseRequest(pof::base::net_manager::req_t& req);
+		bool RemoveAllAccountsInPharmacy(const boost::uuids::uuid& pharmacyId);
+
 
 		std::chrono::system_clock::duration mSessionDuration = std::chrono::days(5);
 		//thread safe

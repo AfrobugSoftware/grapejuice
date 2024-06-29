@@ -162,8 +162,7 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignUp(pof::base::net_man
 		return res;
 	}
 	catch (const js::json::exception& err) {
-		spdlog::error(err.what());
-		return app->mNetManager.bad_request("In properly formarted json");
+		return app->mNetManager.bad_request(err.what());
 	}
 	catch (std::exception& exp) {
 		return app->mNetManager.server_error(exp.what());
@@ -191,7 +190,7 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 
 		js::json jsonData = js::json::parse(data);
 		std::string username = jsonData["username"];
-		std::string password = jsonData["password"];
+		std::string password = jsonData["password"]; //in plain text sent over ssl 
 		std::uint64_t lastSession = static_cast<std::uint64_t>(jsonData["last_session_time"]);
 
 		std::string sql;
@@ -211,22 +210,23 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 		if (!accountDetails || accountDetails->empty()) {
 			return app->mNetManager.bad_request(fmt::format("No account with username or email, \'{}\'", username));
 		}
-
+		auto& acc = *accountDetails->begin();
 		//verify password
+		const std::string passHash = boost::variant2::get<std::string>(acc.first[PASSHASH]);
+		if (!bcrypt::validatePassword(password, passHash)) {
+			return app->mNetManager.auth_error("Invalid password");
+		}
 
-
-
-		//start a session for it
+		//start a session for the user
 		auto sessionquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
 			UPDATE accounts SET session_id = ?, session_start = ? WHERE account_username = ? AND account_id = ?;
 		)"s);
-		auto& pid = boost::variant2::get<boost::uuids::uuid>(accountDetails->at(0).first[PHARMACY_ID]);
-		auto& aid = boost::variant2::get<boost::uuids::uuid>(accountDetails->at(0).first[ACCOUNT_ID]);
-		auto& aun = boost::variant2::get<std::string>(accountDetails->at(0).first[USERNAME]);
+		auto& pid = boost::variant2::get<boost::uuids::uuid>(acc.first[PHARMACY_ID]);
+		auto& aid = boost::variant2::get<boost::uuids::uuid>(acc.first[ACCOUNT_ID]);
+		auto& aun = boost::variant2::get<std::string>(acc.first[USERNAME]);
 
 		auto sid = boost::uuids::random_generator_mt19937{}();
-		auto tt = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration,
-			pof::base::data::clock_t, std::chrono::system_clock::duration>(pof::base::data::clock_t::now());
+		auto tt = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(pof::base::data::clock_t::now());
 		sessionquery->m_arguments = { {
 					boost::mysql::field(boost::mysql::blob(sid.begin(), sid.end())),
 					boost::mysql::field(boost::mysql::datetime(tt)),
@@ -235,6 +235,9 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 		} };
 		fut = std::move(sessionquery->get_future());
 		auto d = fut.get();
+
+		//set session into active sessions
+		mActiveSessions.emplace(sid, acc);
 
 		//response //enahnce the packer to pack multiple tables
 		auto package = pof::base::packer{ *accountDetails }();
@@ -260,6 +263,10 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 {
 	auto app = grape::GetApp();
 	try {
+		if (!AuthuriseRequest(req)) {
+			return app->mNetManager.auth_error("Account not authorised");
+		}
+
 		if (req.method() != http::verb::post) {
 			return app->mNetManager.bad_request("Method should be post method"s);
 		}
@@ -276,8 +283,8 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 		req_body.consume(len);
 
 		js::json jsonData = js::json::parse(data);
-		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["accountID"]));
-		boost::uuids::uuid sessionId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["sessionID"]));
+		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(req["accountID"]);
+		boost::uuids::uuid sessionId = boost::uuids::nil_uuid();
 		boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["pharmacyID"]));
 
 		auto signOutTime = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(std::chrono::system_clock::now());
@@ -309,8 +316,8 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 
 		auto sendData = jobj.dump();
 		boost::beast::http::dynamic_body::value_type value{};
-		auto buffer = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buffer, boost::asio::buffer(sendData));
+		auto buf = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
 		value.commit(sendData.size());
 
 		res.body() = std::move(value);
@@ -327,7 +334,65 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 
 pof::base::net_manager::res_t grape::AccountManager::OnSignInFromSession(pof::base::net_manager::req_t& req, boost::urls::matches& match)
 {
-	return pof::base::net_manager::res_t();
+	auto app = grape::GetApp();
+	try {
+		if (!AuthuriseRequest(req)) {
+			return app->mNetManager.auth_error("Account not signed in");
+		}
+		if (req.method() != http::verb::put) {
+			return app->mNetManager.bad_request("GET method expected");
+		}
+		if(!req.has_content_length()){
+			return app->mNetManager.bad_request("Body is required");
+		}
+			
+		//increase timeout ?
+		auto session_time = pof::base::data::clock_t::now();
+		boost::uuids::uuid sess_id = boost::lexical_cast<boost::uuids::uuid>(req["sessionID"]);
+		boost::uuids::uuid acc_id = boost::lexical_cast<boost::uuids::uuid>(req["accountID"]);
+		
+		//update cache
+		mActiveSessions.visit(sess_id, [&](auto& v) {
+			boost::variant2::get<pof::base::data::datetime_t>(v.second.first[SESSION_START_TIME])
+				= session_time;
+		});
+
+		//update database
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE accounts SET session_start_time = ? WHERE account_id = ? AND session_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(session_time))),
+			boost::mysql::field(boost::mysql::blob(acc_id.begin(), acc_id.end())),
+			boost::mysql::field(boost::mysql::blob(sess_id.begin(), sess_id.end()))
+		}};
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+
+		//block till finished
+		fut.get();
+
+		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "application/json");
+		res.keep_alive(req.keep_alive());
+
+		js::json jobj = js::json::object();
+		jobj["result_status"] = "Successful"s;
+		jobj["result_message"] = "Sucessfully signed in"s;
+
+		auto sendData = jobj.dump();
+		boost::beast::http::dynamic_body::value_type value{};
+		auto buf = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
+		value.commit(sendData.size());
+
+		res.body() = std::move(value);
+		res.prepare_payload();
+		return res;
+	}
+	catch (const std::exception& err) {
+		return app->mNetManager.server_error(err.what());
+	}
 }
 
 pof::base::net_manager::res_t grape::AccountManager::GetActiveSession(pof::base::net_manager::req_t& req, boost::urls::matches& match)
@@ -339,12 +404,8 @@ pof::base::net_manager::res_t grape::AccountManager::UpdateUserAccount(pof::base
 {
 	auto app = grape::GetApp();
 	try {
-		boost::string_view sidText = req["sessionID"];
-		boost::string_view accIDText = req["accountID"];
-		auto sid = boost::lexical_cast<boost::uuids::uuid>(sidText);
-		auto aid = boost::lexical_cast<boost::uuids::uuid>(accIDText);
-		if (!VerifySession(aid, sid)) {
-			return app->mNetManager.bad_request(fmt::format("No active session for user: {}", accIDText));
+		if (!AuthuriseRequest(req)) {
+			return app->mNetManager.auth_error("Account not authorised");
 		}
 
 		auto& body = req.body();
@@ -366,7 +427,7 @@ bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const b
 		//this might block
 		bool found = mActiveSessions.visit(aid,
 			[&](const auto& v) {
-				user = v;
+				user = v.second;
 			});
 		if (!found && !user.has_value()) return false;
 		auto& v = user->first;
@@ -431,10 +492,21 @@ void grape::AccountManager::UpdateSessions()
 	else {
 		//remove expired sessions
 		mActiveSessions.erase_if([&](const auto& ac) -> bool {
-			const auto& v = ac.first;
-			const auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(v[SESSION_START_TIME]);
+			const auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(ac.second.first[SESSION_START_TIME]);
 			return (ustime + mSessionDuration < pof::base::data::clock_t::now());
 		});
 		//how to use mysql functions ? so that it can do the resetting on its own
+	}
+}
+
+bool grape::AccountManager::AuthuriseRequest(pof::base::net_manager::req_t& req)
+{
+	try {
+		const auto sid = boost::lexical_cast<boost::uuids::uuid>(req["Session-ID"]);
+		const auto aid = boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]);
+		return (VerifySession(aid, sid));
+	}
+	catch (const std::exception& err) {
+		return false;
 	}
 }

@@ -84,6 +84,20 @@ void grape::Application::OnTimeout(boost::system::error_code ec)
 	}
 }
 
+std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req)
+{
+	const size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
+	auto& req_body = req.body();
+	std::string data;
+	data.resize(len);
+
+	auto buffer = req_body.data();
+	boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
+	req_body.consume(len);
+
+	return data;
+}
+
 bool grape::VerifyEmail(const std::string& email)
 {
 	const std::regex rex(R"(^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$)");

@@ -72,7 +72,7 @@ void grape::PharmacyManager::CreateAddressTable()
 		auto d = fut.get();
 	}
 	catch (boost::mysql::error_with_diagnostics& err) {
-		
+		//need to log this
 	}
 }
 
@@ -81,6 +81,7 @@ void grape::PharmacyManager::SetRoutes()
 	auto app = grape::GetApp();
 	app->route("/pharmacy/create", std::bind_front(&grape::PharmacyManager::OnCreatePharmacy, this));
 	app->route("/pharmacy/openbranch", std::bind_front(&grape::PharmacyManager::OnOpenPharmacyBranch, this));
+	app->route("/pharmacy/getbranches", std::bind_front(&grape::PharmacyManager::OnGetPharmacyBranches, this));
 	app->route("/pharmacy/setbranchstate/{state}", std::bind_front(&grape::PharmacyManager::OnSetBranchState, this));
 
 }
@@ -110,6 +111,9 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnCreatePharmacy(pof::base
 		std::string pharmacy_name = jsonData["pharmacy_name"];
 		std::string pharmacy_info = jsonData["pharmacy_info"];
 		boost::trim(pharmacy_name);
+		std::transform(pharmacy_name.begin(), pharmacy_name.end(), pharmacy_name.begin(),
+			[](char& c) -> char {return std::tolower(c); });
+
 		if (!CheckIfPharmacyExists(pharmacy_name)) {
 			return app->mNetManager.bad_request("Pharmacy already exists");
 		}
@@ -139,7 +143,7 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnCreatePharmacy(pof::base
 		auto d = fut.get();
 
 		//write pharmacy
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+		query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO pharmacy VALUES (?,?,?,?);)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(pharmacy_id.begin(), pharmacy_id.end())),
@@ -147,6 +151,9 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnCreatePharmacy(pof::base
 			boost::mysql::field(boost::mysql::blob(add_id.begin(), add_id.end())),
 			boost::mysql::field(pharmacy_info)
 		}};
+		fut = std::move(query->get_future());
+		app->mDatabase->push(query);
+		d = fut.get();
 
 		http::response<http::dynamic_body> res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
@@ -160,8 +167,8 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnCreatePharmacy(pof::base
 
 		auto sendData = jobj.dump();
 		boost::beast::http::dynamic_body::value_type value{};
-		auto buffer = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buffer, boost::asio::buffer(sendData));
+		auto buf = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
 		value.commit(sendData.size());
 
 		res.body() = std::move(value);
@@ -177,17 +184,40 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnCreatePharmacy(pof::base
 	}
 }
 
+pof::base::net_manager::res_t grape::PharmacyManager::OnPharmacyInfoUpdate(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			return app->mNetManager.bad_request("GET method expected");
+		}
+
+
+	}
+	catch (const js::json::exception& jerr) {
+		return app->mNetManager.bad_request(jerr.what());
+	}
+	catch (std::exception& exp) {
+		return app->mNetManager.server_error(exp.what());
+	}
+}
+
 pof::base::net_manager::res_t grape::PharmacyManager::OnOpenPharmacyBranch(pof::base::net_manager::req_t& req, boost::urls::matches& match)
 {
 	auto app = grape::GetApp();
 	thread_local static boost::uuids::random_generator_mt19937 uuidGen;
 	try {
+		if (!app->mAccountManager.AuthuriseRequest(req)) {
+			return app->mNetManager.auth_error("Account not authorizesd");
+		}
+
 		if (req.method() != http::verb::post) {
 			return app->mNetManager.bad_request("Method should be post method"s);
 		}
 		if (!req.has_content_length()) {
 			return app->mNetManager.bad_request("Expected a body");
 		}
+
 		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
 		auto& req_body = req.body();
 		std::string data;
@@ -199,18 +229,19 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnOpenPharmacyBranch(pof::
 		
 		//extract data from the object
 		js::json obj = js::json::parse(data);
-		boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(obj["pharamcy_id"]));
-		boost::uuids::uuid sessionId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(obj["session_id"]));
-		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(obj["account_id"]));
-
-		if (!app->mAccountManager.VerifySession(accountId, sessionId)) {
-			return app->mNetManager.auth_error("ACCOUNT NOT AUTHORISED");
-		}
-		boost::uuids::uuid branch_id = uuidGen();
+		const boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(obj["pharamcy_id"]));
 		std::string branch_name = obj["branch_name"];
-		boost::trim(branch_name);
-
 		const std::string branch_info = obj["branch_info"];
+		boost::uuids::uuid branch_id = uuidGen();
+
+		boost::trim(branch_name);
+		std::transform(branch_name.begin(), branch_name.end(), branch_name.begin(),
+			[](char& c) -> char {return std::tolower(c); });
+
+		if (CheckIfBranchExists(branch_name, pharmacyId)) {
+			return app->mNetManager.not_found("Branch exists");
+		}
+
 		const std::uint32_t branch_state = OPEN;
 		//branch address
 		js::json addressObj = obj["address"];
@@ -256,7 +287,7 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnOpenPharmacyBranch(pof::
 
 
 
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		http::response<http::dynamic_body> res{ http::status::created, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
 		res.set(http::field::content_type, "application/json");
 		res.keep_alive(req.keep_alive());
@@ -264,12 +295,13 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnOpenPharmacyBranch(pof::
 		js::json jobj = js::json::object();
 		jobj["result_status"] = "Successful"s;
 		jobj["result_message"] = "Branch created sucessfully"s;
+		jobj["branch_name"] = branch_name;
 		jobj["branch_id"] = boost::lexical_cast<std::string>(branch_id);
 
 		auto sendData = jobj.dump();
 		boost::beast::http::dynamic_body::value_type value{};
-		auto buffer = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buffer, boost::asio::buffer(sendData));
+		auto buf = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
 		value.commit(sendData.size());
 
 		res.body() = std::move(value);
@@ -308,16 +340,7 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnSetBranchState(pof::base
 			throw std::logic_error("Invalid state specified");
 		}
 
-		const size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
-		auto& req_body = req.body();
-		std::string data;
-		data.resize(len);
-
-		auto buffer = req_body.data();
-		boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
-		req_body.consume(len);
-
-		js::json jsonData = js::json::parse(data);
+		js::json jsonData = js::json::parse(app->ExtractString(req));
 		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["accountID"]));
 		boost::uuids::uuid sessionId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["sessionID"]));
 		boost::uuids::uuid branchId =  boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["branchID"]));
@@ -336,7 +359,7 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnSetBranchState(pof::base
 		auto d = fut.get();
 		
 		if ( state == CLOSED ){
-			mActivePharamcyBranches.erase_if(branchId);
+			mActivePharamcyBranches.erase(branchId);
 		}
 		else if( state == OPEN ) {
 			//put the brach into our list of open branches
@@ -366,8 +389,8 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnSetBranchState(pof::base
 		 
 		auto sendData = jobj.dump();
 		boost::beast::http::dynamic_body::value_type value{};
-		auto buffer = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buffer, boost::asio::buffer(sendData));
+		auto buf = value.prepare(sendData.size());
+		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
 		value.commit(sendData.size());
 
 		res.body() = std::move(value);
@@ -386,32 +409,92 @@ pof::base::net_manager::res_t grape::PharmacyManager::OnDestroyPharmacy(pof::bas
 {
 	auto app = grape::GetApp();
 	try{
-	
+		
+
+
 	}
 	catch (const js::json::exception& jerr) {
-	
+		return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
+		return app->mNetManager.server_error(exp.what());
+	}
+
+}
+
+pof::base::net_manager::res_t grape::PharmacyManager::OnGetPharmacyBranches(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (!app->mAccountManager.AuthuriseRequest(req)) {
+			return app->mNetManager.auth_error("Account not authorized");
+		}
+		js::json obj = js::json::parse(app->ExtractString(req));
+		boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(obj["pharmacy_id"]);
+
+		//create the query
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM branches WHERE pharmacy_id = ?;)");
+		query->m_arguments = { {
+					boost::mysql::field(boost::mysql::blob(pharmacyId.begin(), pharmacyId.end()))
+		}};
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto d = fut.get();
+
+		if (d == nullptr && d->empty()) {
+			return app->mNetManager.not_found("No branches for pharmacy");
+		}
+
+
+	}
+	catch (const js::json::exception& jerr) {
+		return app->mNetManager.bad_request(jerr.what());
+	}
+	catch (const std::exception& err) {
+		return app->mNetManager.server_error(err.what());
 	}
 }
 
 bool grape::PharmacyManager::CheckIfPharmacyExists(const std::string& name)
 {
-	if (name.empty()) return;
+	if (name.empty()) return false;
 	auto app = grape::GetApp();
 	try {
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT 1 FROM pharamcy WHERE pharmacy_name LIKE ?;)");
+			R"(SELECT 1 FROM pharamcy WHERE pharmacy_name = ?;)");
 		query->m_arguments = { {
 				boost::mysql::field(name)
 			} };
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
-		auto d = fut.get();
+		auto d = fut.get(); //I need to suspend and not block
 
 		return (d != nullptr && !d->empty());
 	}
 	catch (boost::mysql::error_with_diagnostics& err){
+		return false;
+	}
+}
+
+bool grape::PharmacyManager::CheckIfBranchExists(const std::string& bn, const boost::uuids::uuid& pid)
+{
+	try {
+		auto app = GetApp();
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT 1 FROM branches WHERE branch_name = ? AND pharmacy_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(bn),
+			boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end()))
+		} };
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto d = fut.get(); //I need to suspend and not block
+
+		return (d != nullptr && !d->empty());
+	}
+	catch (const boost::mysql::error_with_diagnostics& err) {
 		return false;
 	}
 }

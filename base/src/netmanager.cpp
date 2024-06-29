@@ -39,7 +39,7 @@ std::error_code pof::base::net_manager::setupssl()
 	m_ssl.use_certificate_file(fp.string(), boost::asio::ssl::context::pem);
 	m_ssl.use_rsa_private_key_file(fp.string(), boost::asio::ssl::context::pem);
 	m_ssl.set_password_callback([](std::size_t len, boost::asio::ssl::context_base::password_purpose pp) -> std::string {
-			
+		return "zino";
 	}, ec);
 
 

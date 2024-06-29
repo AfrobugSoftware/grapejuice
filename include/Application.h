@@ -41,6 +41,7 @@ namespace grape {
 
 		void OnTimeout(boost::system::error_code ec);
 		
+		std::string ExtractString(pof::base::net_manager::req_t& req);
 
 		std::string mServerName; 
 		std::shared_ptr<pof::base::databasemysql> mDatabase;

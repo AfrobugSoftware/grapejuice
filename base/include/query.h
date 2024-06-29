@@ -47,7 +47,7 @@ namespace pof {
 
 			manager::conn_ptr m_connection;
 
-			query(std::shared_ptr<manager> man = nullptr) : m_manager(man) {
+			query(std::shared_ptr<manager> man = nullptr, const std::string& sql = ""s) : m_manager(man), m_sql(sql) {
 				m_data = std::make_shared<pof::base::data>();
 			}
 

@@ -6,6 +6,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <boost/algorithm/string.hpp>
+#include <algorithm>
 
 namespace grape {
 	class PharmacyManager {
@@ -46,6 +47,8 @@ namespace grape {
 		//routes handles
 		pof::base::net_manager::res_t OnCreatePharmacy(pof::base::net_manager::req_t& req,
 			boost::urls::matches& match);
+		pof::base::net_manager::res_t OnPharmacyInfoUpdate(pof::base::net_manager::req_t& req,
+			boost::urls::matches& match);
 		pof::base::net_manager::res_t OnOpenPharmacyBranch(pof::base::net_manager::req_t& req,
 			boost::urls::matches& match);
 		pof::base::net_manager::res_t OnSetBranchState(pof::base::net_manager::req_t& req,
@@ -55,8 +58,13 @@ namespace grape {
 		pof::base::net_manager::res_t OnDestroyPharmacy(pof::base::net_manager::req_t& req,
 			boost::urls::matches& match);
 
+		//queries
+		pof::base::net_manager::res_t OnGetPharmacyBranches(pof::base::net_manager::req_t& req,
+			boost::urls::matches& match);
+
 	private:
 		bool CheckIfPharmacyExists(const std::string& name);
+		bool CheckIfBranchExists(const std::string& bn, const boost::uuids::uuid& pid);
 		//thread safe, active pharmacy cache?
 		boost::concurrent_flat_map<boost::uuids::uuid, 
 			pof::base::data::row_t> mActivePharamcyBranches;

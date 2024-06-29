@@ -8,7 +8,7 @@ void grape::DataManager::push(const packBuffer& buffer)
 
 boost::beast::multi_buffer grape::DataManager::finalise() const
 {
-	std::vector<std::uint8_t> compressed;
+	std::vector<char> compressed;
 	boost::beast::multi_buffer omb;
 
 
@@ -34,7 +34,7 @@ boost::beast::multi_buffer grape::DataManager::finalise() const
 
 void grape::DataManager::Unpack(const boost::beast::multi_buffer& buffer)
 {
-	const size_t size = boost::asio::buffer_size(buffer);
+	const size_t size = buffer.size();
 	if (size == 0) {
 		//is this empty buffer ?
 		return;
@@ -43,7 +43,7 @@ void grape::DataManager::Unpack(const boost::beast::multi_buffer& buffer)
 	auto b = buffer.data();
 	boost::asio::buffer_copy(boost::asio::buffer(tempbuf), b);
 
-	boost::iostreams::basic_array_source<std::uint8_t> as{ tempbuf.data(), tempbuf.size() };
+	boost::iostreams::array_source as{ reinterpret_cast<const char*>(tempbuf.data()), tempbuf.size() };
 	boost::iostreams::filtering_istream ifs;
 	ifs.push(boost::iostreams::bzip2_decompressor());
 	ifs.push(as);

@@ -18,6 +18,7 @@ file(GLOB incs ${PROJECT_SOURCE_DIR}/include/*.h)
 file(GLOB srcs ${PROJECT_SOURCE_DIR}/src/*.cpp)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/base)
+#add_compile_definitions(-D_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING )
 
 add_executable(grapejuice ${incs} ${srcs}) 
 target_include_directories(grapejuice PUBLIC ${Crow_INCLUDE_DIR} ${spdlog_INCLUDE_DIR} ${nlohmann_json_INCLUDE_DIR} ${SQLite_INCLUDE_DIR} ${date_INCLUDE_DIR} ${asio_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/base/include ${PROJECT_SOURCE_DIR}/include)
