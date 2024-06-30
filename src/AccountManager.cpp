@@ -407,10 +407,7 @@ pof::base::net_manager::res_t grape::AccountManager::UpdateUserAccount(pof::base
 		if (!AuthuriseRequest(req)) {
 			return app->mNetManager.auth_error("Account not authorised");
 		}
-
-		auto& body = req.body();
-		auto str = body.cdata();
-		auto jsonData = js::json::parse(std::string(str.begin(), str.end()));
+		auto jsonData = js::json::parse(app->ExtractString(req));
 
 
 	}

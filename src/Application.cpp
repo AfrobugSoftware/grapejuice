@@ -33,7 +33,7 @@ bool grape::Application::Init()
 	//connect update signal
 	mUpdateSignal.connect(std::bind_front(&grape::AccountManager::UpdateSessions,
 		&mAccountManager));
-
+	//read server configuration
 
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
 	mUpdateTimer = boost::asio::steady_timer(mNetManager.io().get_executor(), 30s);
