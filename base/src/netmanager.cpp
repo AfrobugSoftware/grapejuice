@@ -2,10 +2,10 @@
 
 pof::base::net_manager::net_manager()
 	: m_ssl{boost::asio::ssl::context_base::sslv23_server}{
-	auto ec = setupssl();
-	if (ec) {
-		
-	}
+	//auto ec = setupssl();
+	//if (ec) {
+	//	
+	//}
 	
 	m_workgaurd = std::make_unique<net::executor_work_guard<net::io_context::executor_type>>(m_io.get_executor());
 	m_threadvec.reserve(std::thread::hardware_concurrency());
@@ -29,21 +29,24 @@ std::error_code pof::base::net_manager::setupssl()
 	auto fp = std::filesystem::current_path() / "certs" / "certs.pem";
 
 	//this would change
-	boost::system::error_code ec;
+	try {
+		boost::system::error_code ec;
 
 
-	m_ssl.set_default_verify_paths();
-	m_ssl.set_verify_mode(net::ssl::verify_peer);
+		m_ssl.set_default_verify_paths();
+		m_ssl.set_verify_mode(net::ssl::verify_peer);
 
-	//when I get a certificate
-	m_ssl.use_certificate_file(fp.string(), boost::asio::ssl::context::pem);
-	m_ssl.use_rsa_private_key_file(fp.string(), boost::asio::ssl::context::pem);
-	m_ssl.set_password_callback([](std::size_t len, boost::asio::ssl::context_base::password_purpose pp) -> std::string {
-		return "zino";
-	}, ec);
-
-
-	return ec;
+		//when I get a certificate
+		m_ssl.use_certificate_file(fp.string(), boost::asio::ssl::context::pem);
+		m_ssl.use_rsa_private_key_file(fp.string(), boost::asio::ssl::context::pem);
+		m_ssl.set_password_callback([](std::size_t len, boost::asio::ssl::context_base::password_purpose pp) -> std::string {
+			return "zino";
+			}, ec);
+		return ec;
+	}
+	catch (const std::system_error& err) {
+		return err.code();
+	}
 }
 
 

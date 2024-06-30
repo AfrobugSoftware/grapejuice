@@ -4,12 +4,13 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/unordered/concurrent_flat_map.hpp>
 #include <boost/algorithm/string.hpp>
-
 #include <boost/algorithm/string.hpp>
+#include <boost/noncopyable.hpp>
+
 #include <algorithm>
 
 namespace grape {
-	class PharmacyManager {
+	class PharmacyManager  : public boost::noncopyable{
 	public:
 		PharmacyManager();
 		~PharmacyManager();
