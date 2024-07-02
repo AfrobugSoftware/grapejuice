@@ -26,7 +26,6 @@ namespace grape {
 		public std::enable_shared_from_this<Application>
 	{
 	public:
-		boost::signals2::signal<void(void)> mUpdateSignal;
 		Application(const std::string& servername);
 		virtual ~Application();
 
@@ -39,7 +38,6 @@ namespace grape {
 		void route(const std::string& target,
 			pof::base::net_manager::callback&& endpoint);
 
-		void OnTimeout(boost::system::error_code ec);
 		
 		std::string ExtractString(pof::base::net_manager::req_t& req);
 
@@ -50,7 +48,9 @@ namespace grape {
 		grape::AccountManager mAccountManager;
 		grape::PharmacyManager mPharmacyManager;
 
-		boost::optional<boost::asio::steady_timer> mUpdateTimer = boost::none;
+		boost::asio::awaitable<void> RunUpdateTimer();
+		boost::optional<pof::base::dataquerybase::timer_t> mUpdateTimer = boost::none;
+		std::vector<std::function<boost::asio::awaitable<void>(void)>> mUpdateAsyncFuncs;
 	};
 
 	extern std::shared_ptr<Application> GetApp();

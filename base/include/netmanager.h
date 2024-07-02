@@ -22,7 +22,7 @@ namespace pof
 		class net_manager : private boost::noncopyable
 		{
 		public:
-			using callback = std::function<http::response<http::dynamic_body>(http::request<http::dynamic_body>&, boost::urls::matches&)>;
+			using callback = std::function<boost::asio::awaitable<http::response<http::dynamic_body>>(http::request<http::dynamic_body>&&, boost::urls::matches&&)>;
 			using req_t = http::request<http::dynamic_body>;
 			using res_t = http::response<http::dynamic_body>;
 			class httpsession : public boost::enable_shared_from_this<httpsession>
@@ -73,6 +73,7 @@ namespace pof
 			res_t server_error(const std::string& err);
 			res_t not_found(const std::string& err);
 			res_t auth_error(const std::string& err);
+			res_t timeout_error();
 
 			void run();
 

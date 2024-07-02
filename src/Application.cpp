@@ -21,23 +21,26 @@ bool grape::Application::Init()
 	);
 
 	mDatabase->create_pool();
-	mDatabase->connect();
+	bool isConnected = mDatabase->connect();
+	if (isConnected) {
+		mDatabase->create_database("grapejuice");
+		mDatabase->use_database("grapejuice"s);
 
-	mDatabase->create_database("grapejuice");
-	mDatabase->use_database("grapejuice"s);
+		//
+		CreateTable(); //creates the tables
+	}
 
-	//
-	CreateTable(); //creates the tables
+	//read server configuration
+	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
 	CreateRoutes();
 
-	//connect update signal
-	mUpdateSignal.connect(std::bind_front(&grape::AccountManager::UpdateSessions,
-		&mAccountManager));
-	//read server configuration
 
-	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), 8080));
-	mUpdateTimer = boost::asio::steady_timer(mNetManager.io().get_executor(), 30s);
-	return false;
+	//setup update
+	mUpdateAsyncFuncs.emplace_back(std::bind_front(&grape::AccountManager::UpdateSessions, &mAccountManager));
+
+	boost::asio::co_spawn(mNetManager.io().get_executor(),
+		RunUpdateTimer(), boost::asio::detached);
+	return true;
 }
 
 bool grape::Application::Run()
@@ -48,7 +51,7 @@ bool grape::Application::Run()
 
 bool grape::Application::Exit()
 {
-	mUpdateTimer->cancel();
+	if(mUpdateTimer.has_value()) mUpdateTimer->cancel();
 	mDatabase->disconnect();
 	mNetManager.stop();
 	return false;
@@ -75,15 +78,6 @@ void grape::Application::route(const std::string& target, pof::base::net_manager
 		std::forward<pof::base::net_manager::callback>(endpoint));
 }
 
-void grape::Application::OnTimeout(boost::system::error_code ec)
-{
-	mUpdateSignal();
-	if (mUpdateTimer){
-		mUpdateTimer->expires_from_now(30s);
-		mUpdateTimer->async_wait(std::bind_front(&grape::Application::OnTimeout, this));
-	}
-}
-
 std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req)
 {
 	const size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
@@ -96,6 +90,20 @@ std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req
 	req_body.consume(len);
 
 	return data;
+}
+
+boost::asio::awaitable<void> grape::Application::RunUpdateTimer()
+{
+	mUpdateTimer = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+	for (;;){
+		mUpdateTimer->expires_after(std::chrono::milliseconds(30));
+		auto&& [ec] = co_await mUpdateTimer->async_wait();
+		if (ec == boost::asio::error::operation_aborted) break;
+
+		for (const auto& v : mUpdateAsyncFuncs) {
+			co_await v();
+		}
+	}
 }
 
 bool grape::VerifyEmail(const std::string& email)

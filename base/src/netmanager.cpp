@@ -152,6 +152,30 @@ pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::stri
 	return res;
 }
 
+pof::base::net_manager::res_t pof::base::net_manager::timeout_error()
+{
+	http::response<http::dynamic_body> res{ http::status::request_timeout, 11 };
+	res.set(http::field::server, USER_AGENT_STRING);
+	res.set(http::field::content_type, "application/json");
+	res.keep_alive(true);
+
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = "operation timeout";
+
+
+	auto ret = obj.dump();
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
+
+
+	res.body() = value;
+	res.prepare_payload();
+	return res;
+}
+
 void pof::base::net_manager::run()
 {
 	boost::make_shared<listener>(*this, m_io, m_endpoint)->run();
@@ -312,15 +336,15 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 			});
 	}
 	else {
-		auto res = (*found)(parser->get(), m);
-		using response_type = typename std::decay<decltype(res)>::type;
+		boost::asio::co_spawn(stream_.get_executor(), (*found)(std::move(parser->get()), std::move(m)), [self = shared_from_this()](std::exception_ptr ptr, pof::base::net_manager::res_t res) {
+			using response_type = typename std::decay<decltype(res)>::type;
 		auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
-		auto self = shared_from_this();
-		http::async_write(stream_, *sp,
-			[self, sp](
+		http::async_write(self->stream_, *sp,
+			[self = self->shared_from_this(), sp](
 				beast::error_code ec, std::size_t bytes)
 			{
 				self->on_write(ec, bytes, sp->need_eof());
+			});
 		});
 	}
 }

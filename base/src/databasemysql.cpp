@@ -53,12 +53,12 @@ bool pof::base::databasemysql::connect()
 	boost::mysql::error_code ec;
 	boost::mysql::diagnostics d;
 	m_isconnected = false;
-	for (auto iter = m_pool.begin(); iter != m_pool.end(); iter++) {
-		(*iter)->connect(*results.begin(), params, ec, d);
-		if (ec) {
-			m_pool.erase(iter);
-		}
-	}
+	auto iter = std::remove_if(m_pool.begin(), m_pool.end(), [&](auto& conn) {
+		conn->connect(*results.begin(), params, ec, d);
+		return static_cast<bool>(ec);
+	});
+	m_pool.erase(iter, m_pool.end());
+
 	if (!m_pool.empty()) m_isconnected = true;
 	return m_isconnected;
 }

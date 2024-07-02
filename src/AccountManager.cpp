@@ -34,18 +34,15 @@ void grape::AccountManager::CreateAccountTable()
 	);)"s;
 	auto fut = query->get_future();
 	app->mDatabase->push(query);
-	auto status = fut.wait_for(10ms);
-	if (status == std::future_status::ready) {
-		try {
-			auto data = fut.get();
-			if (!data) {
-				spdlog::error("Canont create account table");
-			}
+	try {
+		auto data = fut.get();
+		if (!data) {
+			spdlog::error("Canont create account table");
 		}
-		catch (boost::mysql::error_with_diagnostics& exp) {
-			spdlog::error("{}: {}", exp.what(),
-					exp.get_diagnostics().client_message().data());
-		}
+	}
+	catch (boost::mysql::error_with_diagnostics& exp) {
+		spdlog::error("{}: {}", exp.what(),
+			exp.get_diagnostics().client_message().data());
 	}
 }
 
@@ -59,13 +56,14 @@ void grape::AccountManager::SetRoutes()
 }
 
 
-pof::base::net_manager::res_t grape::AccountManager::OnSignUp(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::OnSignUp(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
 	
 	try {
 		if (!req.has_content_length()) {
-			return app->mNetManager.bad_request("Expected a body");
+			co_return app->mNetManager.bad_request("Expected a body");
 		}
 		size_t len = boost::lexical_cast<size_t>(req.at("content-length"));
 		auto& req_body = req.body();
@@ -80,15 +78,15 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignUp(pof::base::net_man
 		
 		//verify data
 		if (!grape::VerifyEmail(static_cast<std::string>(jsonData["email"]))) {
-			return app->mNetManager.bad_request("Invalid email");
+			co_return app->mNetManager.bad_request("Invalid email");
 		}
 
 		if (!grape::VerifyPhonenumber(static_cast<std::string>(jsonData["phonenumber"]))) {
-			return app->mNetManager.bad_request("Invalid email");
+			co_return app->mNetManager.bad_request("Invalid email");
 		}
 
-		if (CheckUsername(static_cast<std::string>(jsonData["username"]))) {
-			return app->mNetManager.bad_request("Username already exisits");
+		if (bool b = co_await CheckUsername(static_cast<std::string>(jsonData["username"]))) {
+			co_return app->mNetManager.bad_request("Username already exisits");
 		}
 
 
@@ -127,16 +125,27 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignUp(pof::base::net_man
 				boost::mysql::field(boost::mysql::datetime())
 		};
 
-		query->m_arguments.push_back(std::move(args));
-		auto fut = query->get_future();
-		app->mDatabase->push(query);
-
 		try {
-			auto dp = fut.get(); //block until we finish or throw an exception
+			query->m_arguments.push_back(std::move(args));
+			query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+			query->m_waittime->expires_after(std::chrono::seconds(60));
+
+			auto fut = query->get_future();
+			app->mDatabase->push(query);
+
+			auto&& [ec] = co_await query->m_waittime->async_wait();
+			if (ec == boost::asio::error::operation_aborted){
+				//was cancelled as a result of completion
+				auto dp = fut.get(); //block until we finish or throw an exception
+			}
+			else {
+				//any other error including a timeout
+				co_return app->mNetManager.timeout_error();
+			}
 		}
 		catch (boost::mysql::error_with_diagnostics& err) {
 			spdlog::error(err.what());
-			return app->mNetManager.server_error(err.what());
+			co_return app->mNetManager.server_error(err.what());
 		}
 
 
@@ -159,25 +168,26 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignUp(pof::base::net_man
 
 		res.body() = std::move(value);
 		res.prepare_payload();
-		return res;
+		co_return res;
 	}
 	catch (const js::json::exception& err) {
-		return app->mNetManager.bad_request(err.what());
+		co_return app->mNetManager.bad_request(err.what());
 	}
 	catch (std::exception& exp) {
-		return app->mNetManager.server_error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 
-pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::OnSignIn(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
 	try{
 		if (req.method() != http::verb::post) {
-			return app->mNetManager.bad_request("Method should be post method"s);
+			co_return app->mNetManager.bad_request("Method should be post method"s);
 		}
 		if (!req.has_content_length()) {
-			return app->mNetManager.bad_request("Expected a body");
+			co_return app->mNetManager.bad_request("Expected a body");
 		}
 		size_t len = boost::lexical_cast<size_t>(req.at("content-length"));
 		auto& req_body = req.body();
@@ -203,18 +213,28 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, std::move(sql));
 		query->m_arguments = { {boost::mysql::field(username)} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
+
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
 
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			//was cancelled as a result of completion of timer, or any other error occurs
+			co_return app->mNetManager.timeout_error();
+		}
+
 		auto accountDetails = fut.get();
 		if (!accountDetails || accountDetails->empty()) {
-			return app->mNetManager.bad_request(fmt::format("No account with username or email, \'{}\'", username));
+			co_return app->mNetManager.bad_request(fmt::format("No account with username or email, \'{}\'", username));
 		}
 		auto& acc = *accountDetails->begin();
 		//verify password
 		const std::string passHash = boost::variant2::get<std::string>(acc.first[PASSHASH]);
 		if (!bcrypt::validatePassword(password, passHash)) {
-			return app->mNetManager.auth_error("Invalid password");
+			co_return app->mNetManager.auth_error("Invalid password");
 		}
 
 		//start a session for the user
@@ -233,7 +253,15 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 					boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())),
 					boost::mysql::field(boost::mysql::blob(aid.begin(), aid.end()))
 		} };
+		sessionquery->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		sessionquery->m_waittime->expires_after(std::chrono::seconds(60));
 		fut = std::move(sessionquery->get_future());
+		app->mDatabase->push(sessionquery);
+
+		auto&& [ec2] = co_await query->m_waittime->async_wait();
+		if (ec2 != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
 		auto d = fut.get();
 
 		//set session into active sessions
@@ -252,26 +280,27 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignIn(pof::base::net_man
 		value.commit(package.size());
 
 		res.prepare_payload();
-		return res;
+		co_return res;
 	}
 	catch (std::exception& err) {
-		return app->mNetManager.server_error(err.what());
+		co_return app->mNetManager.server_error(err.what());
 	}
 }
 
-pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::OnSignOut(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
 	try {
 		if (!AuthuriseRequest(req)) {
-			return app->mNetManager.auth_error("Account not authorised");
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 
 		if (req.method() != http::verb::post) {
-			return app->mNetManager.bad_request("Method should be post method"s);
+			co_return app->mNetManager.bad_request("Method should be post method"s);
 		}
 		if (!req.has_content_length()) {
-			return app->mNetManager.bad_request("Expected a body");
+			co_return app->mNetManager.bad_request("Expected a body");
 		}
 		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
 		auto& req_body = req.body();
@@ -297,8 +326,14 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 				boost::mysql::field(boost::mysql::blob(sessionId.begin(), sessionId.end())),
 				boost::mysql::field(boost::mysql::blob(accountId.begin(), accountId.end()))
 		}};
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
 		auto d = fut.get();
 
 
@@ -322,34 +357,35 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignOut(pof::base::net_ma
 
 		res.body() = std::move(value);
 		res.prepare_payload();
-		return res;
+		co_return res;
 	}
 	catch (const js::json::exception& jerr) {
-		return app->mNetManager.bad_request(jerr.what());
+		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (std::exception& ptr) {
-		return app->mNetManager.server_error(ptr.what());
+		co_return app->mNetManager.server_error(ptr.what());
 	}
 }
 
-pof::base::net_manager::res_t grape::AccountManager::OnSignInFromSession(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::OnSignInFromSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
 	try {
 		if (!AuthuriseRequest(req)) {
-			return app->mNetManager.auth_error("Account not signed in");
+			co_return app->mNetManager.auth_error("Account not signed in");
 		}
 		if (req.method() != http::verb::put) {
-			return app->mNetManager.bad_request("GET method expected");
+			co_return app->mNetManager.bad_request("GET method expected");
 		}
 		if(!req.has_content_length()){
-			return app->mNetManager.bad_request("Body is required");
+			co_return app->mNetManager.bad_request("Body is required");
 		}
 			
 		//increase timeout ?
 		auto session_time = pof::base::data::clock_t::now();
-		boost::uuids::uuid sess_id = boost::lexical_cast<boost::uuids::uuid>(req["sessionID"]);
-		boost::uuids::uuid acc_id = boost::lexical_cast<boost::uuids::uuid>(req["accountID"]);
+		boost::uuids::uuid sess_id = boost::lexical_cast<boost::uuids::uuid>(req["Session-ID"]);
+		boost::uuids::uuid acc_id = boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]);
 		
 		//update cache
 		mActiveSessions.visit(sess_id, [&](auto& v) {
@@ -365,11 +401,16 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignInFromSession(pof::ba
 			boost::mysql::field(boost::mysql::blob(acc_id.begin(), acc_id.end())),
 			boost::mysql::field(boost::mysql::blob(sess_id.begin(), sess_id.end()))
 		}};
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
-
-		//block till finished
-		fut.get();
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		//check if we have an error
+		(void)fut.get();
 
 		http::response<http::dynamic_body> res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
@@ -388,31 +429,33 @@ pof::base::net_manager::res_t grape::AccountManager::OnSignInFromSession(pof::ba
 
 		res.body() = std::move(value);
 		res.prepare_payload();
-		return res;
+		co_return res;
 	}
 	catch (const std::exception& err) {
-		return app->mNetManager.server_error(err.what());
+		co_return app->mNetManager.server_error(err.what());
 	}
 }
 
-pof::base::net_manager::res_t grape::AccountManager::GetActiveSession(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::GetActiveSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
-	return pof::base::net_manager::res_t();
+	co_return pof::base::net_manager::res_t();
 }
 
-pof::base::net_manager::res_t grape::AccountManager::UpdateUserAccount(pof::base::net_manager::req_t& req, boost::urls::matches& match)
+boost::asio::awaitable<pof::base::net_manager::res_t>
+	grape::AccountManager::UpdateUserAccount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
 	try {
 		if (!AuthuriseRequest(req)) {
-			return app->mNetManager.auth_error("Account not authorised");
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 		auto jsonData = js::json::parse(app->ExtractString(req));
 
 
 	}
 	catch (std::exception& exp) {
-		return app->mNetManager.server_error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
 	}
 
 }
@@ -440,7 +483,8 @@ bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const b
 	return false;
 }
 
-bool grape::AccountManager::CheckUsername(const std::string& username)
+boost::asio::awaitable<bool>
+	grape::AccountManager::CheckUsername(const std::string& username)
 {
 	auto app = grape::GetApp();
 	try {
@@ -448,19 +492,28 @@ bool grape::AccountManager::CheckUsername(const std::string& username)
 			SELECT 1 FROM accounts WHERE account_username = ?;
 		)");
 		query->m_arguments = { {boost::mysql::field(username)} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
 
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
 		auto accountDetails = fut.get();
-		return (!accountDetails || accountDetails->empty()) ? false : true;
+		co_return (!accountDetails || accountDetails->empty()) ? false : true;
 	}
 	catch (std::exception& exp) {
 		spdlog::error(exp.what());
 	}
-	return false;
+	co_return false;
 }
 
-void grape::AccountManager::UpdateSessions()
+boost::asio::awaitable<void>
+	grape::AccountManager::UpdateSessions()
 {
 	auto app = grape::GetApp();
 	if (mActiveSessions.empty()){
@@ -469,13 +522,19 @@ void grape::AccountManager::UpdateSessions()
 			SELECT * FROM accounts WHERE session_id IS NOT ?;
 		)");
 		auto nullid = boost::uuids::nil_uuid();
-		query->m_arguments = { {
-			boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))}};
+		query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))}};
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
 
 		auto accountDetails = fut.get();
-		if(!accountDetails || accountDetails->empty()) return;
+		if(!accountDetails || accountDetails->empty()) co_return;
 
 		for (auto& ac : *accountDetails) {
 			auto& v = ac.first;

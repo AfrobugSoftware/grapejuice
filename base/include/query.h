@@ -46,6 +46,7 @@ namespace pof {
 			std::promise<std::shared_ptr<pof::base::data>> m_promise;
 
 			manager::conn_ptr m_connection;
+			std::optional<timer_t> m_waittime;
 
 			query(std::shared_ptr<manager> man = nullptr, const std::string& sql = ""s) : m_manager(man), m_sql(sql) {
 				m_data = std::make_shared<pof::base::data>();
@@ -90,10 +91,12 @@ namespace pof {
 					if (!result.has_value()) {
 						//query did not return a value, is this an error ?
 						m_promise.set_value(nullptr); //set an empty data ? 
+						if(m_waittime.has_value()) m_waittime->cancel();
 						co_return;
 					}
 					else if (result.rows().empty()) {
-						m_promise.set_value(m_data); //set an empty data ? 
+						m_promise.set_value(m_data); //set an empty data ?
+						if(m_waittime.has_value()) m_waittime->cancel();
 						co_return;
 					}
 					else {
@@ -208,6 +211,8 @@ namespace pof {
 				}catch (...) {
 					m_promise.set_exception(std::current_exception());
 			    }
+				if(m_waittime.has_value()) m_waittime->cancel();
+				co_return;
 			}
 		};
 
@@ -282,10 +287,13 @@ namespace pof {
 						boost::mysql::throw_on_error(ec, base_t::m_diag);
 						if (!result.has_value()) {
 							base_t::m_promise.set_value(nullptr);
+							if(base_t::m_waittime.has_value()) base_t::m_waittime->cancel();
 							co_return;
 						}
 						else if (result.empty()) {
 							base_t::m_promise.set_value(base_t::m_data);
+							if (base_t::m_waittime.has_value()) base_t::m_waittime->cancel();
+							co_return;
 						}
 						else {
 							const auto& meta = result.meta();
@@ -401,7 +409,8 @@ namespace pof {
 				} catch (...) {
 					base_t::m_promise.set_exception(std::current_exception());
 				}
-
+				if (base_t::m_waittime.has_value()) base_t::m_waittime->cancel();
+				co_return;
 			}
 		};
 	}
