@@ -62,7 +62,7 @@ namespace pof {
 			bool push(std::shared_ptr<pof::base::query<databasemysql>> query);
 
 			void setupssl();
-			boost::asio::awaitable<void> runquery();
+			boost::asio::awaitable<void> runquery(std::shared_ptr<pof::base::query<databasemysql>> query);
 
 
 			//also closes 
@@ -88,8 +88,6 @@ namespace pof {
 			boost::asio::io_context& mIos;
 			boost::asio::ssl::context& mSsl;
 
-			std::shared_mutex m_querymut;
-			std::deque<std::shared_ptr<pof::base::query<databasemysql>>> m_queryque;
 			boost::asio::ip::tcp::resolver m_resolver;
 
 			std::atomic<bool> m_isrunning;

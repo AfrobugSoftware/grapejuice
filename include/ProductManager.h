@@ -32,9 +32,9 @@ namespace grape {
 			PRODUCT_SIDEEFFECTS,
 			PRODUCT_BARCODE,
 			PRODUCT_CATEGORY,
+			PRODUCT_MIN_STOCK_COUNT,
 
 			//Product setting
-			//PRODUCT_MIN_STOCK_COUNT,
 			//PRODUCT_EXPIRE_PERIOD,
 			//PRODUCT_TO_EXPIRE_DATE, //NUMBER OF PERIOD TO WAIT TO BE INFORMED
 			PRODUCT_MAX
@@ -94,6 +94,7 @@ namespace grape {
 		};
 
 		enum :std::uint8_t {
+			INVOICE_PHARMACY_ID,
 			INVOICE_BRANCH_ID,
 			INVOICE_SUPP_ID,
 			INVOICE_ID,
@@ -138,5 +139,15 @@ namespace grape {
 		void CreateCategoryTable();
 		void CreateInvoiceTable();
 
+		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
+
+		//routes
+		void SetRoutes();
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnAddProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnUpdateProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 	};
 };

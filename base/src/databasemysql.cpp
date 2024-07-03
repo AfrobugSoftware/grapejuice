@@ -68,12 +68,8 @@ bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemys
 	try {
 		auto sp = borrow(); //get a connection
 		if (sp) {
-			std::unique_lock<std::shared_mutex> lock(m_querymut);
 			query->m_connection = sp;
-			m_queryque.push_back(query);
-			lock.unlock();
-
-			boost::asio::co_spawn(sp->get_executor(), runquery(), boost::asio::detached);
+			boost::asio::co_spawn(sp->get_executor(), runquery(query), boost::asio::detached);
 		} else {
 			//no connection
 			spdlog::error("No connection avaliable");
@@ -82,7 +78,7 @@ bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemys
 	}
 	catch (const std::system_error& err) {
 		//what do we do here
-		auto ec = err.code();
+		auto& ec = err.code();
 		if (ec == std::make_error_code(pof::base::errc::no_connection_avaliable)) {
 			//no connection avalibale, wait for connection
 			return false;
@@ -95,21 +91,13 @@ void pof::base::databasemysql::setupssl()
 {
 }
 
-boost::asio::awaitable<void> pof::base::databasemysql::runquery()
+boost::asio::awaitable<void> pof::base::databasemysql::runquery(std::shared_ptr<pof::base::query<databasemysql>> query)
 {
 	if (m_isconnected) {
-		std::unique_lock<std::shared_mutex> lock(m_querymut);
-		if (m_queryque.empty()) co_return;
-
-		std::shared_ptr<dataquerybase> dq = m_queryque.front();
-		m_queryque.pop_front();
-		lock.unlock();
-		std::error_code ec;
 		try {
 			//execute the query
-			co_await(*dq)();
-			unborrow(dq->m_connection);
-			co_return;
+			co_await(*query)();
+			unborrow(query->m_connection);
 		}
 		catch (...) {
 			std::rethrow_exception(std::current_exception());
@@ -195,16 +183,18 @@ void pof::base::databasemysql::use_database(const std::string& name)
 
 void pof::base::databasemysql::create_database(const std::string& name)
 {
-	auto query = std::make_shared<pof::base::query<pof::base::databasemysql>>(shared_from_this());
-	query->m_sql = fmt::format("CREATE DATABASE IF NOT EXISTS {};", name);
-	auto fut = query->get_future();
-	push(query);
+	try {
+		auto query = std::make_shared<pof::base::query<pof::base::databasemysql>>(shared_from_this());
+		query->m_sql = fmt::format("CREATE DATABASE IF NOT EXISTS {};", name);
+		auto fut = query->get_future();
+		push(query);
 
-	std::future_status stat = std::future_status::timeout;
-	stat = fut.wait_for(1s);
-	if (stat == std::future_status::ready) {
-		auto data = fut.get();
+		(void)fut.get();
 	}
+	catch (const std::exception& exp) {
+		spdlog::error("Failed to create database");
+	}
+
 }
 
 pof::base::databasemysql::conn_ptr pof::base::databasemysql::create()

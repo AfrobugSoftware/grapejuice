@@ -9,6 +9,13 @@ grape::PharmacyManager::~PharmacyManager()
 {
 }
 
+void grape::PharmacyManager::CreateTables()
+{
+	CreatePharmacyTable();
+	CreateBranchTable();
+	CreateAddressTable();
+}
+
 void grape::PharmacyManager::CreatePharmacyTable()
 {
 	auto app = grape::GetApp();

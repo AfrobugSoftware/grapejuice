@@ -87,7 +87,7 @@ namespace pof
             >;
             
             using state_t = std::bitset<static_cast<size_t>(std::underlying_type_t<state>(state::MAX_STATE))>;
-            using update_t = std::bitset<64>; //update flags
+            using update_t = std::bitset<256>; //update flags
             using row_t = std::pair<std::vector<data_t>, std::pair<state_t, update_t>>;
             using table_t = std::vector<row_t>;
             
@@ -315,7 +315,7 @@ namespace pof
                         old_col = col;
                         ar >> s;
                         kind k = static_cast<kind>(s);
-
+                        value.back().second.second.set(col);
                         switch (k)
                         {
                         case pof::base::data::kind::int32:

@@ -15,7 +15,7 @@ namespace grape {
 		PharmacyManager();
 		~PharmacyManager();
 
-
+		void CreateTables();
 		void CreatePharmacyTable();
 		void CreateBranchTable();
 		void CreateAddressTable();

@@ -152,6 +152,30 @@ pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::stri
 	return res;
 }
 
+pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::string& err)
+{
+	http::response<http::dynamic_body> res{ http::status::unprocessable_entity, 11 };
+	res.set(http::field::server, USER_AGENT_STRING);
+	res.set(http::field::content_type, "application/json");
+	res.keep_alive(true);
+
+	js::json obj = js::json::object();
+	obj["result_status"] = "failed"s;
+	obj["result_message"] = err;
+
+
+	auto ret = obj.dump();
+	http::dynamic_body::value_type value;
+	auto buffer = value.prepare(ret.size());
+	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
+	value.commit(ret.size());
+
+
+	res.body() = value;
+	res.prepare_payload();
+	return res;
+}
+
 pof::base::net_manager::res_t pof::base::net_manager::timeout_error()
 {
 	http::response<http::dynamic_body> res{ http::status::request_timeout, 11 };

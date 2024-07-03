@@ -73,6 +73,7 @@ namespace pof
 			res_t server_error(const std::string& err);
 			res_t not_found(const std::string& err);
 			res_t auth_error(const std::string& err);
+			res_t unprocessiable(const std::string& err);
 			res_t timeout_error();
 
 			void run();
