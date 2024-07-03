@@ -30,7 +30,7 @@ boost::asio::awaitable<std::error_code> pof::base::databasemysql::connect(conn_p
 	if (hostname.empty() || port.empty() || user.empty() || pwd.empty())
 			throw std::system_error(std::make_error_code(pof::base::errc::no_database_hostname));
 
-	auto [ec1, endpoints] = co_await m_resolver.async_resolve(hostname, port, tuple_awaitable);
+	auto&& [ec1, endpoints] = co_await m_resolver.async_resolve(hostname, port, tuple_awaitable);
 	if (ec1) 
 		throw std::system_error(ec1);
 	
