@@ -87,6 +87,31 @@ bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemys
 	return true;
 }
 
+boost::asio::awaitable<bool>
+	pof::base::databasemysql::retry(std::shared_ptr<pof::base::query<databasemysql>> query)
+{
+	int retry_count = 3;
+	try {
+		pof::base::dataquerybase::timer_t timer(co_await boost::asio::this_coro::executor);
+		timer.expires_after(10ms);
+		auto&& [ec] = co_await timer.async_wait();
+		if (!ec) {
+			while (retry_count > 0) {
+				bool pushed = push(query->shared_from_this());
+				if (pushed) co_return true;
+
+				timer.expires_after(10ms);
+				std::tie(ec) = co_await timer.async_wait();
+				retry_count--;
+			}
+		}
+		co_return false;
+	}
+	catch (const std::exception& exp) {
+		co_return false;
+	}
+}
+
 void pof::base::databasemysql::setupssl()
 {
 }

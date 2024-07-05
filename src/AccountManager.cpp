@@ -53,6 +53,7 @@ void grape::AccountManager::SetRoutes()
 	app->route("/account/signin", std::bind_front(&grape::AccountManager::OnSignIn, this));
 	app->route("/account/signout", std::bind_front(&grape::AccountManager::OnSignOut, this));
 	app->route("/account/updateaccount", std::bind_front(&grape::AccountManager::UpdateUserAccount, this));
+	app->route("/account/getpharmacyusers/{pid}", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
 }
 
 
@@ -460,6 +461,62 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 }
 
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+	grape::AccountManager::GetUsersForPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		auto pid = boost::lexical_cast<boost::uuids::uuid>(match["pid"]);
+		if (!AuthuriseRequest(req)) {
+			co_return app->mNetManager.auth_error("Cannot authorize user");
+		}
+		if (IsPharmacyUser(
+			boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]), pid)) {
+			co_return app->mNetManager.bad_request("User does not belong to the requested pharmacy");
+		}
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM accounts WHERE pharmacy_id = ?;)");
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_arguments = { {
+		boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end()))
+		} };
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		auto pack = pof::base::packer{ *data }();
+
+
+		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "application/octlet-stream");
+		res.keep_alive(req.keep_alive());
+
+		http::dynamic_body::value_type value;
+		auto out = value.prepare(pack.size());
+		boost::asio::buffer_copy(out, boost::asio::buffer(pack));
+		value.commit(pack.size());
+
+		res.body() = std::move(value);
+		res.prepare_payload();
+		co_return res;
+	}
+	catch (const std::exception& exp) {
+		
+	}
+}
+
 bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid)
 {
 	try {
@@ -565,4 +622,16 @@ bool grape::AccountManager::AuthuriseRequest(pof::base::net_manager::req_t& req)
 	catch (const std::exception& err) {
 		return false;
 	}
+}
+
+bool grape::AccountManager::IsPharmacyUser(const boost::uuids::uuid& accountID, const boost::uuids::uuid& pharmacyID)
+{
+	boost::optional<pof::base::data::row_t> user = boost::none;
+	//this might block
+	bool found = mActiveSessions.visit(accountID,
+		[&](const auto& v) {
+			user = v.second;
+		});
+	if (!found && !user.has_value()) return false;
+	return (boost::variant2::get<boost::uuids::uuid>(user->first[0]) == pharmacyID);
 }

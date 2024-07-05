@@ -12,6 +12,25 @@ namespace grape {
 	class ProductManager : public boost::noncopyable {
 	public:
 		enum : std::uint8_t {
+			FORMULARY_ID,
+			FORMULARY_NAME,
+			FORMULARY_CREATED_BY_NAME,
+			FORMULARY_CREATED_DATE,
+			FORMULARY_ACCESS_LEVEL
+		};
+
+		//formulary access leve
+		enum : std::uint8_t {
+			ACCESS_PRIVATE =  0x01,
+			ACCESS_PUBLIC  =  0x02,
+		};
+
+		enum : std::uint8_t {
+			FORUMARY_ID,
+			PRODUCT_ID
+		};
+
+		enum : std::uint8_t {
 			PRODUCT_PHARMACY_UUID,
 			PRODUCT_BRANCH_UUID,
 			PRODUCT_UUID,
@@ -33,6 +52,7 @@ namespace grape {
 			PRODUCT_BARCODE,
 			PRODUCT_CATEGORY,
 			PRODUCT_MIN_STOCK_COUNT,
+			PRODUCT_FORMULARY_ID,
 
 			//Product setting
 			//PRODUCT_EXPIRE_PERIOD,
@@ -103,6 +123,14 @@ namespace grape {
 			INVOICE_MAX,
 		};
 
+		enum : std::uint8_t {
+			PHARMACY_ID,
+			BRANCH_ID,
+			EXPIRED_PRODUCT_ID,
+			EXPIRED_QUANTITY,
+			EXPIRED_DATE,
+		};
+
 		//order state
 		enum : std::uint8_t {
 			PENDING,
@@ -138,8 +166,10 @@ namespace grape {
 		void CreateSupplierTable();
 		void CreateCategoryTable();
 		void CreateInvoiceTable();
+		void CreateExpiredTable();
 
 		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
+
 
 		//routes
 		void SetRoutes();
@@ -149,5 +179,12 @@ namespace grape {
 			OnUpdateProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t>
 			OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
 	};
 };

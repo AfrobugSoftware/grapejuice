@@ -60,6 +60,7 @@ namespace pof {
 			bool connect();
 			//Adds a query to the queue
 			bool push(std::shared_ptr<pof::base::query<databasemysql>> query);
+			boost::asio::awaitable<bool> retry(std::shared_ptr<pof::base::query<databasemysql>> query);
 
 			void setupssl();
 			boost::asio::awaitable<void> runquery(std::shared_ptr<pof::base::query<databasemysql>> query);

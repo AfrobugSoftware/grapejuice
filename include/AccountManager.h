@@ -57,6 +57,8 @@ namespace grape
 
 		boost::asio::awaitable<pof::base::net_manager::res_t> UpdateUserAccount(pof::base::net_manager::req_t&& req,
 			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> GetUsersForPharmacy(pof::base::net_manager::req_t&& req,
+			boost::urls::matches&& match);
 
 		bool VerifySession(const boost::uuids::uuid& aid, 
 			const boost::uuids::uuid& sid);
@@ -66,6 +68,8 @@ namespace grape
 		boost::asio::awaitable<void> UpdateSessions();
 
 		bool AuthuriseRequest(pof::base::net_manager::req_t& req);
+		bool IsPharmacyUser(const boost::uuids::uuid& accountID,
+			const boost::uuids::uuid& pharmacyID);
 		bool RemoveAllAccountsInPharmacy(const boost::uuids::uuid& pharmacyId);
 
 
