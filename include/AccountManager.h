@@ -13,9 +13,16 @@ namespace grape
 {
 	class AccountManager : public boost::noncopyable {
 	public:
+		//account type
 		enum : std::uint8_t {
-			PHARMACY_ID = 0,
+			ACCOUNT_PHARMACY = 0x01,
+			ACCOUNT_INSTITUTION = 0x02,
+		};
+
+		enum : std::uint8_t {
+			ID = 0, //may be a pharmacy or an institution
 			ACCOUNT_ID,
+			ACCOUNT_TYPE,
 			PRIVILAGE,
 			FIRST_NAME,
 			LAST_NAME,
@@ -68,8 +75,8 @@ namespace grape
 		boost::asio::awaitable<void> UpdateSessions();
 
 		bool AuthuriseRequest(pof::base::net_manager::req_t& req);
-		bool IsPharmacyUser(const boost::uuids::uuid& accountID,
-			const boost::uuids::uuid& pharmacyID);
+		bool IsUser(const boost::uuids::uuid& accountID,
+			const boost::uuids::uuid& id);
 		bool RemoveAllAccountsInPharmacy(const boost::uuids::uuid& pharmacyId);
 
 

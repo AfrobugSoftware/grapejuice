@@ -189,6 +189,35 @@ namespace pof {
 									v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
 									break;
 								case boost::mysql::column_type::char_:
+								{
+									//is char converted to blob or stirng
+									auto collect = row.at(i).as_string();
+									const size_t size = collect.size();
+									switch (size)
+									{
+										//reserving 16 bytes fixed length for uuids
+									case 16:
+									{
+										boost::uuids::uuid uuid{};
+										std::copy(collect.begin(), collect.end(), uuid.begin());
+										v[i] = uuid;
+										datameta[i] = pof::base::data::kind::uuid;
+									}
+									break;
+									//reserving 17 bytes fixed length for currency
+									case 17:
+									{
+										pof::base::currency cur;
+										std::ranges::copy(collect, cur.data().begin());
+										v[i] = cur;
+										datameta[i] = pof::base::data::kind::currency;
+									}
+									break;
+									default:
+										break;
+									}
+								}
+								break;
 								case boost::mysql::column_type::varchar:
 								case boost::mysql::column_type::text:
 								case boost::mysql::column_type::enum_:
@@ -321,11 +350,20 @@ namespace pof {
 								case boost::mysql::column_type::float_:
 									datameta.emplace_back(pof::base::data::kind::float32);
 									break;
+								case boost::mysql::column_type::date:
+								case boost::mysql::column_type::time:
+								case boost::mysql::column_type::timestamp:
 								case boost::mysql::column_type::datetime:
 									datameta.emplace_back(pof::base::data::kind::datetime);
 									break;
+								case boost::mysql::column_type::char_:
+									
+									break;
+								case boost::mysql::column_type::bit:
+								case boost::mysql::column_type::binary:
+								case boost::mysql::column_type::varbinary:
 								case boost::mysql::column_type::blob:
-									datameta.emplace_back(pof::base::data::kind::float32);
+									datameta.emplace_back(pof::base::data::kind::blob);
 									break;
 								case boost::mysql::column_type::int_:
 									datameta.push_back(pof::base::data::kind::int32);
@@ -352,6 +390,9 @@ namespace pof {
 
 									switch (k)
 									{
+									case boost::mysql::column_type::tinyint:
+										v[i] = static_cast<std::uint8_t>(row.at(i).as_int64());
+										break;
 									case boost::mysql::column_type::int_:
 										v[i] = row.at(i).as_int64();
 										break;
@@ -380,13 +421,42 @@ namespace pof {
 									}
 									break;
 
-									case boost::mysql::column_type::time:
 									case boost::mysql::column_type::date:
+									case boost::mysql::column_type::time:
 									case boost::mysql::column_type::datetime:
 									case boost::mysql::column_type::timestamp:
-										v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
+										v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
+											pof::base::data::clock_t::duration>(row.at(i).as_datetime().as_time_point())); // wrong type
 										break;
 									case boost::mysql::column_type::char_:
+									{
+										auto collect = row.at(i).as_string();
+										const size_t size = collect.size();
+										switch (size)
+										{
+										//reserving 16 bytes fixed length for uuids
+										case 16:
+										{
+											boost::uuids::uuid uuid{};
+											std::copy(collect.begin(), collect.end(), uuid.begin());
+											v[i] = uuid;
+											datameta[i] = pof::base::data::kind::uuid;
+										}
+											break;
+										//reserving 17 bytes fixed length for currency
+										case 17:
+										{
+											pof::base::currency cur;
+											std::ranges::copy(collect, cur.data().begin());
+											v[i] = cur;
+											datameta[i] = pof::base::data::kind::currency;
+										}
+											break;
+										default:
+											break;
+										}
+									}
+									break;
 									case boost::mysql::column_type::varchar:
 									case boost::mysql::column_type::text:
 									//case boost::mysql::column_type::enum_:

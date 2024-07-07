@@ -15,8 +15,9 @@ void grape::AccountManager::CreateAccountTable()
 	auto app = grape::GetApp();
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase);
 	query->m_sql = R"(CREATE TABLE IF NOT EXISTS account (
-		pharmacy_id blob,
-		account_id blob,
+		id char(16),
+		account_id char(16),
+		account_type tinyint,
 		privilage integer,
 		account_first_name text,
 		account_last_name text,
@@ -29,7 +30,7 @@ void grape::AccountManager::CreateAccountTable()
 		sec_ans_hash text, 
 		signin_time datetime, 
 		signout_time datetime,
-		session_id blob,
+		session_id char(16),
 		session_start datetime
 	);)"s;
 	auto fut = query->get_future();
@@ -100,7 +101,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			 R"(INSERT INTO account VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?);)"s);
+			 R"(INSERT INTO account VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		std::vector<boost::mysql::field> args;
 		pof::base::data::duuid_t pid = boost::uuids::random_generator_mt19937{}();
 		pof::base::data::duuid_t uid = boost::uuids::random_generator_mt19937{}();
@@ -110,7 +111,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		args = {
 				boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())),
 				boost::mysql::field(boost::mysql::blob(uid.begin(), uid.end())),
-				boost::mysql::field(static_cast<int>(jsonData["privilage"])),
+				boost::mysql::field(static_cast<std::uint8_t>(jsonData["account_type"])),
+				boost::mysql::field(static_cast<std::uint32_t > (jsonData["privilage"])),
 				boost::mysql::field(static_cast<std::string>(jsonData["account_first_name"])),
 				boost::mysql::field(static_cast<std::string>(jsonData["account_last_name"])),
 				boost::mysql::field(boost::mysql::date(dates[0], dates[1], dates[2])),
@@ -132,7 +134,13 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			query->m_waittime->expires_after(std::chrono::seconds(60));
 
 			auto fut = query->get_future();
-			app->mDatabase->push(query);
+			bool tried = app->mDatabase->push(query);
+			if (!tried) {
+				tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+				if (!tried) {
+					co_return app->mNetManager.server_error("Error in query");
+				}
+			}
 
 			auto&& [ec] = co_await query->m_waittime->async_wait();
 			if (ec == boost::asio::error::operation_aborted){
@@ -242,7 +250,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto sessionquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
 			UPDATE accounts SET session_id = ?, session_start = ? WHERE account_username = ? AND account_id = ?;
 		)"s);
-		auto& pid = boost::variant2::get<boost::uuids::uuid>(acc.first[PHARMACY_ID]);
+		auto& pid = boost::variant2::get<boost::uuids::uuid>(acc.first[ID]);
 		auto& aid = boost::variant2::get<boost::uuids::uuid>(acc.first[ACCOUNT_ID]);
 		auto& aun = boost::variant2::get<std::string>(acc.first[USERNAME]);
 
@@ -470,7 +478,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (!AuthuriseRequest(req)) {
 			co_return app->mNetManager.auth_error("Cannot authorize user");
 		}
-		if (IsPharmacyUser(
+		if (IsUser(
 			boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]), pid)) {
 			co_return app->mNetManager.bad_request("User does not belong to the requested pharmacy");
 		}
@@ -624,7 +632,7 @@ bool grape::AccountManager::AuthuriseRequest(pof::base::net_manager::req_t& req)
 	}
 }
 
-bool grape::AccountManager::IsPharmacyUser(const boost::uuids::uuid& accountID, const boost::uuids::uuid& pharmacyID)
+bool grape::AccountManager::IsUser(const boost::uuids::uuid& accountID, const boost::uuids::uuid& id)
 {
 	boost::optional<pof::base::data::row_t> user = boost::none;
 	//this might block
@@ -633,5 +641,5 @@ bool grape::AccountManager::IsPharmacyUser(const boost::uuids::uuid& accountID, 
 			user = v.second;
 		});
 	if (!found && !user.has_value()) return false;
-	return (boost::variant2::get<boost::uuids::uuid>(user->first[0]) == pharmacyID);
+	return (boost::variant2::get<boost::uuids::uuid>(user->first[0]) == id);
 }

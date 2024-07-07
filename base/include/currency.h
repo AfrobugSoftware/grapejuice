@@ -29,7 +29,7 @@ namespace pof {
 		public:
 			//14.2 14 char for the higher domination and 2 for the lower
 			//99,999,999,999,999.99 the highest amount a currency can hold
-			constexpr static size_t max = 16;
+			constexpr static size_t max = 17;
 			constexpr static const std::string_view cur_type = "N";
 			using cur_char_t = char;
 			using cur_t = std::array <cur_char_t, max>;

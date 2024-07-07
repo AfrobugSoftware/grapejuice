@@ -23,7 +23,7 @@ void grape::PharmacyManager::CreatePharmacyTable()
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 		R"(
 			CREATE TABLE IF NOT EXISTS pharmacy (
-			pharmacy_id blob,
+			pharmacy_id char(16) not null,
 			pharmacy_name text,
 			pharamcy_address blob,
 			pharmacy_info text
@@ -38,6 +38,28 @@ void grape::PharmacyManager::CreatePharmacyTable()
 	}
 }
 
+void grape::PharmacyManager::CreateInstitution()
+{
+	try {
+		auto app = grape::GetApp();
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE TABLE IF NOT EXISTS institutions (
+				id char(16),
+				name text,
+				type tinyint,
+				address_id char(16),
+				info text
+			);)");
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+
+		(void)fut.get();
+	}
+	catch (const std::exception& err) {
+		spdlog::error(err.what());
+	}
+}
+
 void grape::PharmacyManager::CreateBranchTable()
 {
 	auto app = grape::GetApp();
@@ -45,8 +67,8 @@ void grape::PharmacyManager::CreateBranchTable()
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(
 			CREATE TABLE IF NOT EXSITS branches (
-			branch_id blob,
-			pharmacy_id blob,
+			branch_id char(16),
+			pharmacy_id char(16),
 			address_id blob,
 			branch_name text,
 			branch_state integer,
@@ -67,7 +89,7 @@ void grape::PharmacyManager::CreateAddressTable()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS address (
-			address_id blob,
+			address_id char(16) not null,
 			country text,
 			state text,
 			lga text,
@@ -508,6 +530,30 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 	}
 }
 
+boost::asio::awaitable<pof::base::net_manager::res_t> grape::PharmacyManager::OnCreateInstitutions(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (!app->mAccountManager.AuthuriseRequest(req)) {
+			co_return app->mNetManager.auth_error("Account not authorizesd");
+		}
+
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("Method should be post method"s);
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		
+	}
+	catch (const js::json::exception& jerr) {
+		co_return app->mNetManager.bad_request(jerr.what());
+	}
+	catch (const std::exception& err) {
+		co_return app->mNetManager.server_error(err.what());
+	}
+}
+
 boost::asio::awaitable<bool>
 	grape::PharmacyManager::CheckIfPharmacyExists(const std::string& name)
 {
@@ -533,6 +579,39 @@ boost::asio::awaitable<bool>
 		co_return (d != nullptr && !d->empty());
 	}
 	catch (boost::mysql::error_with_diagnostics& err){
+		co_return false;
+	}
+	catch (const std::exception& exp) {
+		
+		co_return false;
+	}
+}
+
+boost::asio::awaitable<bool> grape::PharmacyManager::CheckIfInstitutionExists(const std::string& name)
+{
+	if (name.empty()) co_return false;
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT 1 FROM institution WHERE name = ?;)");
+		query->m_arguments = { {
+				boost::mysql::field(name)
+			} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		auto d = fut.get(); //I need to suspend and not block
+
+		co_return (d != nullptr && !d->empty());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return false;
 	}
 }

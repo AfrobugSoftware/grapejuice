@@ -61,6 +61,7 @@ void grape::Application::CreateRoutes()
 {
 	mAccountManager.SetRoutes();
 	mPharmacyManager.SetRoutes();
+	mProductManager.SetRoutes();
 }
 
 void grape::Application::CreateTable()
@@ -69,7 +70,8 @@ void grape::Application::CreateTable()
 	mPharmacyManager.CreatePharmacyTable();
 	mPharmacyManager.CreateBranchTable();
 	mPharmacyManager.CreateAddressTable();
-
+	mProductManager.CreateTables();
+	mProductManager.Procedures();
 }
 
 void grape::Application::route(const std::string& target, pof::base::net_manager::callback&& endpoint)

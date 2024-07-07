@@ -13,26 +13,41 @@ namespace grape {
 	public:
 		enum : std::uint8_t {
 			FORMULARY_ID,
+			FORMULARY_CREATOR_ID,
 			FORMULARY_NAME,
 			FORMULARY_CREATED_BY_NAME,
 			FORMULARY_CREATED_DATE,
 			FORMULARY_ACCESS_LEVEL
 		};
 
-		//formulary access leve
+		//formulary access level
 		enum : std::uint8_t {
 			ACCESS_PRIVATE =  0x01,
 			ACCESS_PUBLIC  =  0x02,
 		};
 
+		//formulary content
 		enum : std::uint8_t {
 			FORUMARY_ID,
 			PRODUCT_ID
 		};
 
+		//pharmacy products
 		enum : std::uint8_t {
-			PRODUCT_PHARMACY_UUID,
-			PRODUCT_BRANCH_UUID,
+			PHARMACY_ID,
+			BRANCH_ID,
+			PHARMA_PRODUCT_ID,
+			PHARMA_PRODUCT_UNIT_PRICE,
+			PHARMA_PRODUCT_COST_PRICE,
+			PHARMA_PRODUCT_STOCK_COUNT, // TRACKS THE PRESENT STOCK OF THE PRODUCT
+			PHARMA_PRODUCT_MIN_STOCK_COUNT,
+			PHARMA_PRODUCT_DATE_ADDED,
+			PHARMA_PRODUCT_DATE_EXPIRE,
+			PHARMA_PRODUCT_CATEGORY,
+		};
+
+		//products table
+		enum : std::uint8_t {
 			PRODUCT_UUID,
 			PRODUCT_SERIAL_NUM,
 			PRODUCT_NAME,
@@ -44,19 +59,10 @@ namespace grape {
 			PRODUCT_USAGE_INFO,
 			PRODUCT_DESCRIP,
 			PRODUCT_HEALTH_CONDITIONS, //COMMA SEPERATED
-			PRODUCT_UNIT_PRICE,
-			PRODUCT_COST_PRICE,
 			PRODUCT_PACKAGE_SIZE,
-			PRODUCT_STOCK_COUNT, // TRACKS THE PRESENT STOCK OF THE PRODUCT
 			PRODUCT_SIDEEFFECTS,
 			PRODUCT_BARCODE,
-			PRODUCT_CATEGORY,
-			PRODUCT_MIN_STOCK_COUNT,
-			PRODUCT_FORMULARY_ID,
-
-			//Product setting
-			//PRODUCT_EXPIRE_PERIOD,
-			//PRODUCT_TO_EXPIRE_DATE, //NUMBER OF PERIOD TO WAIT TO BE INFORMED
+			PRODUCT_MANUFACTURES_NAME,
 			PRODUCT_MAX
 		};
 
@@ -124,8 +130,8 @@ namespace grape {
 		};
 
 		enum : std::uint8_t {
-			PHARMACY_ID,
-			BRANCH_ID,
+			EXPIRED_PHARMACY_ID,
+			EXPIRED_BRANCH_ID,
 			EXPIRED_PRODUCT_ID,
 			EXPIRED_QUANTITY,
 			EXPIRED_DATE,
@@ -167,9 +173,10 @@ namespace grape {
 		void CreateCategoryTable();
 		void CreateInvoiceTable();
 		void CreateExpiredTable();
+		void CreatePharmacyProductTable();
 
+		//utilities
 		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
-
 
 		//routes
 		void SetRoutes();
@@ -185,6 +192,15 @@ namespace grape {
 			OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t>
 			OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t>
+			OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+
+		// mysql procedures
+		void Procedures();
+		void RemovePharamProducts();
 
 	};
 };

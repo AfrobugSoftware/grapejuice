@@ -50,7 +50,7 @@ std::error_code pof::base::net_manager::setupssl()
 }
 
 
-pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::string& err)
+pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::string& err) const
 {
 	http::response<http::dynamic_body> res{ http::status::bad_request, 11 };
 
@@ -76,7 +76,7 @@ pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::str
 	return res;
 }
 
-pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::string& err)
+pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::string& err) const
 {
 	http::response<http::dynamic_body> res{ http::status::internal_server_error, 11 };
 
@@ -102,7 +102,7 @@ pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::st
 	return res;
 }
 
-pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::string& err)
+pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::string& err) const
 {
 	http::response<http::dynamic_body> res{ http::status::not_found, 11 };
 
@@ -128,7 +128,7 @@ pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::strin
 	return res;
 }
 
-pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::string& err)
+pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::string& err) const
 {
 	http::response<http::dynamic_body> res{ http::status::unauthorized, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
@@ -152,7 +152,7 @@ pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::stri
 	return res;
 }
 
-pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::string& err)
+pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::string& err) const
 {
 	http::response<http::dynamic_body> res{ http::status::unprocessable_entity, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
@@ -176,7 +176,7 @@ pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::
 	return res;
 }
 
-pof::base::net_manager::res_t pof::base::net_manager::timeout_error()
+pof::base::net_manager::res_t pof::base::net_manager::timeout_error() const
 {
 	http::response<http::dynamic_body> res{ http::status::request_timeout, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
@@ -233,6 +233,7 @@ void pof::base::net_manager::listener::on_accept(beast::error_code ec, tcp::sock
 	if (ec) return fail(ec, "accept");
 
 	//lunch a session
+	spdlog::info("connected at {}", socket.remote_endpoint().address().to_string());
 	boost::make_shared<httpsession>(manager,std::move(socket))->run();
 
 	//schelde another accept
@@ -292,7 +293,7 @@ void pof::base::net_manager::httpsession::do_read()
 {
 	parser.emplace();
 	parser->body_limit(10000);
-	stream_.expires_after(std::chrono::seconds(30));
+	stream_.expires_after(std::chrono::seconds(60));
 
 	// Read a request
 	http::async_read(

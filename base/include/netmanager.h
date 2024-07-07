@@ -69,12 +69,12 @@ namespace pof
 			inline net::ssl::context& ssl() { return m_ssl; }
 
 
-			res_t bad_request(const std::string& err);
-			res_t server_error(const std::string& err);
-			res_t not_found(const std::string& err);
-			res_t auth_error(const std::string& err);
-			res_t unprocessiable(const std::string& err);
-			res_t timeout_error();
+			res_t bad_request(const std::string& err) const;
+			res_t server_error(const std::string& err) const;
+			res_t not_found(const std::string& err) const;
+			res_t auth_error(const std::string& err) const;
+			res_t unprocessiable(const std::string& err) const;
+			res_t timeout_error() const;
 
 			void run();
 

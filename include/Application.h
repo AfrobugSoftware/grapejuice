@@ -13,6 +13,10 @@
 
 #include "AccountManager.h"
 #include "PharmacyManager.h"
+#include "ProductManager.h"
+
+//protocol serialiser
+#include "serialiser.h"
 
 namespace grape {
 	namespace js = nlohmann;
@@ -47,6 +51,7 @@ namespace grape {
 		pof::base::net_manager mNetManager;
 		grape::AccountManager mAccountManager;
 		grape::PharmacyManager mPharmacyManager;
+		grape::ProductManager mProductManager;
 
 		boost::asio::awaitable<void> RunUpdateTimer();
 		boost::optional<pof::base::dataquerybase::timer_t> mUpdateTimer = boost::none;

@@ -9,11 +9,11 @@ pof::base::currency::currency(const std::string& string)
 {
 	try {
 		double d = atof(string.c_str());
-		if (std::signbit(d)) {
-			throw pof::base::currency_exception("Cannot have negetive currency");
-		}
+		std::uint8_t s = std::signbit(d) ? 0x01 : 0x00;
+
 		auto integer = static_cast<std::int64_t>(std::floor(d * 100));
 		fmt::format_to(m_data.begin(), "{:d}", integer);
+		m_data[max - 1] = s;
 	}
 	catch (const std::exception& exp) {
 		std::rethrow_exception(std::current_exception());
@@ -22,11 +22,10 @@ pof::base::currency::currency(const std::string& string)
 
 pof::base::currency::currency(double cur)
 {
-	if (std::signbit(cur)) {
-		throw pof::base::currency_exception("Currency cannot be negetive");
-	}
+	std::uint8_t s = std::signbit(cur) ? 0x01 : 0x00;
 	auto integer = static_cast<std::int64_t>(std::floor(cur * 100));
 	fmt::format_to(m_data.begin(), "{:d}", integer);
+	m_data[max - 1] = s;
 }
 
 pof::base::currency::currency(const cur_t& cur_data)
@@ -149,10 +148,11 @@ pof::base::currency::operator double() const
 {
 	double total = 0.0;
 	int d = 0;
-	for (int i = 0; m_data[i] != '\0' && i < m_data.size(); i++) {
-		d = (d * 10) + m_data[i] - '0';
+	for (int i = 0; m_data[i] != '\0' && i < m_data.size() - 1; i++) {
+		d = (d * 10) + (m_data[i] - '0');
 	}
 	total = (static_cast<double>(d) * 0.01); 
+	if (m_data[max - 1]) total = std::copysign(total, -0.0);
 	return total;
 }
 
