@@ -127,48 +127,32 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
-		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
 		auto& req_body = req.body();
-		std::string data;
-		data.resize(len);
+		auto&& [pharmacy, buf] = grape::serial::read<grape::pharmacy>(boost::asio::buffer(req_body));
 
-		auto buffer = req_body.data();
-		boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
-		req_body.consume(len);
-
-		js::json jsonData = js::json::parse(data);
-		boost::uuids::uuid pharmacy_id = uuidGen();
-		std::string pharmacy_name = jsonData["pharmacy_name"];
-		std::string pharmacy_info = jsonData["pharmacy_info"];
-		boost::trim(pharmacy_name);
-		std::transform(pharmacy_name.begin(), pharmacy_name.end(), pharmacy_name.begin(),
+		boost::trim(pharmacy.name);
+		std::transform(pharmacy.name.begin(), pharmacy.name.end(), pharmacy.name.begin(),
 			[](char& c) -> char {return std::tolower(c); });
 		bool b = false;
-		if (!(b = co_await CheckIfPharmacyExists(pharmacy_name))) {
+		if (!(b = co_await CheckIfPharmacyExists(pharmacy.name))) {
 			co_return app->mNetManager.bad_request("Pharmacy already exists");
 		}
 
-		js::json addressObj = jsonData["address"];
-		boost::uuids::uuid add_id = uuidGen();
-		const std::string country = addressObj["country"];
-		const std::string state = addressObj["state"];
-		const std::string lga = addressObj["lga"];
-		const std::string street = addressObj["street"];
-		const std::string num = addressObj["num"];
-		const std::string addInfo = addressObj["add_description"];
+		auto&& [address, buf2] = grape::serial::read<grape::address>(buf);
 
 		//write the address
+		address.id = uuidGen();
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO address (country, state, lag, street, num, add_description) VALUES (?,?,?,?,?,?);)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-				boost::mysql::field(country),
-				boost::mysql::field(state),
-				boost::mysql::field(lga),
-				boost::mysql::field(street),
-				boost::mysql::field(num),
-				boost::mysql::field(addInfo),
+				boost::mysql::field(address.country),
+				boost::mysql::field(address.state),
+				boost::mysql::field(address.lga),
+				boost::mysql::field(address.street),
+				boost::mysql::field(address.num),
+				boost::mysql::field(address.add_info),
 		} };
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -180,14 +164,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto d = fut.get();
 
 		//write pharmacy
+		pharmacy.id = uuidGen();
 		query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO pharmacy VALUES (?,?,?,?);)");
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-			boost::mysql::field(boost::mysql::blob(pharmacy_id.begin(), pharmacy_id.end())),
-			boost::mysql::field(pharmacy_name),
-			boost::mysql::field(boost::mysql::blob(add_id.begin(), add_id.end())),
-			boost::mysql::field(pharmacy_info)
+			boost::mysql::field(boost::mysql::blob(pharmacy.id.begin(), pharmacy.id.end())),
+			boost::mysql::field(pharmacy.name),
+			boost::mysql::field(boost::mysql::blob(address.id.begin(), address.id.end())),
+			boost::mysql::field(pharmacy.info)
 		}};
 		fut = std::move(query->get_future());
 		app->mDatabase->push(query);
@@ -197,21 +182,17 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 		d = fut.get();
 
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		pof::base::net_manager::res_t res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/json");
+		res.set(http::field::content_type, "application/octlet-stream");
 		res.keep_alive(req.keep_alive());
-
-		js::json jobj = js::json::object();
-		jobj["result_status"] = "Successful"s;
-		jobj["result_message"] = "Branch created sucessfully"s;
-		jobj["pharmacy_id"] = boost::lexical_cast<std::string>(pharmacy_id);
-
-		auto sendData = jobj.dump();
-		boost::beast::http::dynamic_body::value_type value{};
-		auto buf = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
-		value.commit(sendData.size());
+		
+		pof::base::net_manager::res_t::body_type::value_type value;
+		pharmacy.address_id = address.id;
+		const size_t size = grape::serial::get_size(pharmacy);
+		value.resize(size);
+		
+		grape::serial::write(boost::asio::buffer(value), pharmacy);
 
 		res.body() = std::move(value);
 		res.prepare_payload();
@@ -245,6 +226,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 	}
 }
 
+//creates a new branch
 boost::asio::awaitable<pof::base::net_manager::res_t>
 	grape::PharmacyManager::OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
@@ -262,54 +244,39 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
 
-		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
 		auto& req_body = req.body();
-		std::string data;
-		data.resize(len);
-
-		auto buffer = req_body.data();
-		boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
-		req_body.consume(len);
+		auto&& [branch, buf] = grape::serial::read<grape::branches>(boost::asio::buffer(req_body));
 		
 		//extract data from the object
-		js::json obj = js::json::parse(data);
-		const boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(obj["pharamcy_id"]));
-		std::string branch_name = obj["branch_name"];
-		const std::string branch_info = obj["branch_info"];
-		boost::uuids::uuid branch_id = uuidGen();
-
-		boost::trim(branch_name);
-		std::transform(branch_name.begin(), branch_name.end(), branch_name.begin(),
+		branch.id = uuidGen();
+		boost::trim(branch.name);
+		std::transform(branch.name.begin(), branch.name.end(), branch.name.begin(),
 			[](char& c) -> char {return std::tolower(c); });
 		bool b = false;
-		if ((b = co_await  CheckIfBranchExists(branch_name, pharmacyId))) {
+		if ((b = co_await  CheckIfBranchExists(branch.name, branch.pharmacy_id))) {
 			co_return app->mNetManager.not_found("Branch exists");
 		}
-
-		const std::uint32_t branch_state = OPEN;
+		
+		//open the branch
+		branch.state = OPEN;
+		
 		//branch address
-		js::json addressObj = obj["address"];
-		boost::uuids::uuid add_id = uuidGen();
-		const std::string country = addressObj["country"];
-		const std::string state = addressObj["state"];
-		const std::string lga = addressObj["lga"];
-		const std::string street = addressObj["street"];
-		const std::string num = addressObj["num"];
-		const std::string addInfo = addressObj["add_description"];
-
+		auto&& [address, buf2] = grape::serial::read<grape::address>(buf);
+		address.id = uuidGen();
+		
 		//write the address
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO address (address_id, country, state, lag, street, num, add_description) VALUES (?,?,?,?,?,?,?);)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-				boost::mysql::field(boost::mysql::blob(add_id.begin(), add_id.end())),
-				boost::mysql::field(country),
-				boost::mysql::field(state),
-				boost::mysql::field(lga),
-				boost::mysql::field(street),
-				boost::mysql::field(num),
-				boost::mysql::field(addInfo),
+				boost::mysql::field(boost::mysql::blob(address.id.begin(), address.id.end())),
+				boost::mysql::field(address.country),
+				boost::mysql::field(address.state),
+				boost::mysql::field(address.lga),
+				boost::mysql::field(address.street),
+				boost::mysql::field(address.num),
+				boost::mysql::field(address.add_info),
 		} };
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -326,12 +293,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		)");
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-					boost::mysql::field(boost::mysql::blob(pharmacyId.begin(), pharmacyId.end())),
-					boost::mysql::field(boost::mysql::blob(branch_id.begin(), branch_id.end())),
-					boost::mysql::field(boost::mysql::blob(add_id.begin(), add_id.end())),
-					boost::mysql::field(branch_name),
-					boost::mysql::field(branch_state),
-					boost::mysql::field(branch_info)
+					boost::mysql::field(boost::mysql::blob(branch.pharmacy_id.begin(), branch.pharmacy_id.end())),
+					boost::mysql::field(boost::mysql::blob(branch.id.begin(), branch.id.end())),
+					boost::mysql::field(boost::mysql::blob(address.id.begin(), address.id.end())),
+					boost::mysql::field(branch.name),
+					boost::mysql::field(branch.state),
+					boost::mysql::field(branch.info)
 		} };
 		fut = std::move(query->get_future());
 		app->mDatabase->push(query);
@@ -344,22 +311,17 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 
 
-		http::response<http::dynamic_body> res{ http::status::created, 11 };
+		pof::base::net_manager::res_t res{ http::status::created, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/json");
+		res.set(http::field::content_type, "application/octlet-stream");
 		res.keep_alive(req.keep_alive());
 
-		js::json jobj = js::json::object();
-		jobj["result_status"] = "Successful"s;
-		jobj["result_message"] = "Branch created sucessfully"s;
-		jobj["branch_name"] = branch_name;
-		jobj["branch_id"] = boost::lexical_cast<std::string>(branch_id);
+		pof::base::net_manager::res_t::body_type::value_type value;
+		branch.address_id = address.id;
+		const size_t size = grape::serial::get_size(branch);
+		value.resize(size);
 
-		auto sendData = jobj.dump();
-		boost::beast::http::dynamic_body::value_type value{};
-		auto buf = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
-		value.commit(sendData.size());
+		grape::serial::write(boost::asio::buffer(value), branch);
 
 		res.body() = std::move(value);
 		res.prepare_payload();
@@ -398,19 +360,17 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			throw std::logic_error("Invalid state specified");
 		}
 
-		js::json jsonData = js::json::parse(app->ExtractString(req));
-		boost::uuids::uuid accountId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["accountID"]));
-		boost::uuids::uuid sessionId = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["sessionID"]));
-		boost::uuids::uuid branchId =  boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["branchID"]));
-		std::string pharmacyId = jsonData["pharmacyID"];
-		if (!app->mAccountManager.VerifySession(accountId, sessionId)) {
+		auto& req_body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(req_body));
+
+		if (!app->mAccountManager.VerifySession(cred.account_id, cred.session_id)) {
 			co_return app->mNetManager.auth_error("ACCOUNT NOT AUTHORISED");
 		}
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(UPDATE branches set branch_state = ? WHERE branch_id = ?;)");
 		query->m_arguments = {
 			{boost::mysql::field(state), 
-			 boost::mysql::field(boost::mysql::blob(branchId.begin(), branchId.end()))} };
+			 boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))} };
 		auto fut = query->get_future();
 		auto&& [ec] = co_await query->m_waittime->async_wait();
 		if (ec != boost::asio::error::operation_aborted) {
@@ -420,7 +380,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto d = fut.get();
 		
 		if ( state == CLOSED ){
-			mActivePharamcyBranches.erase(branchId);
+			mActivePharamcyBranches.erase(cred.branch_id);
 		}
 		else if( state == OPEN ) {
 			//put the brach into our list of open branches
@@ -428,7 +388,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				R"(SELECT * FROM branches WHERE branch_id = ?;)");
 			query->m_waittime->expires_after(60s);
 			query->m_arguments = { {
-					boost::mysql::field(boost::mysql::blob(branchId.begin(), branchId.end()))
+					boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
 			}};
 			fut = std::move(query->get_future());
 			app->mDatabase->push(query);
@@ -440,8 +400,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			if (d == nullptr || d->empty()) {
 				co_return app->mNetManager.server_error("Cannot set branch to open");
 			}
-			auto& branchId = boost::variant2::get<boost::uuids::uuid>((d->begin())->first[BRANCH_ID]);
-			mActivePharamcyBranches.emplace(branchId, *d->begin());
+
+			mActivePharamcyBranches.emplace(cred.branch_id, );
 		}
 
 		http::response<http::dynamic_body> res{ http::status::ok, 11 };

@@ -52,7 +52,7 @@ std::error_code pof::base::net_manager::setupssl()
 
 pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::string& err) const
 {
-	http::response<http::dynamic_body> res{ http::status::bad_request, 11 };
+	res_t res{ http::status::bad_request, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
@@ -63,13 +63,11 @@ pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::str
 	obj["result_message"] = err;
 
 
+
 	auto ret = obj.dump();
-
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
-
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
 
 	res.body() = value;
 	res.prepare_payload();
@@ -78,7 +76,7 @@ pof::base::net_manager::res_t pof::base::net_manager::bad_request(const std::str
 
 pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::string& err) const
 {
-	http::response<http::dynamic_body> res{ http::status::internal_server_error, 11 };
+	res_t res{ http::status::internal_server_error, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
@@ -90,12 +88,9 @@ pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::st
 
 
 	auto ret = obj.dump();
-
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
-
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
 
 	res.body() = value;
 	res.prepare_payload();
@@ -104,7 +99,7 @@ pof::base::net_manager::res_t pof::base::net_manager::server_error(const std::st
 
 pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::string& err) const
 {
-	http::response<http::dynamic_body> res{ http::status::not_found, 11 };
+	res_t res{ http::status::not_found, 11 };
 
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
@@ -117,10 +112,9 @@ pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::strin
 
 	auto ret = obj.dump();
 
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
 
 
 	res.body() = value;
@@ -130,7 +124,7 @@ pof::base::net_manager::res_t pof::base::net_manager::not_found(const std::strin
 
 pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::string& err) const
 {
-	http::response<http::dynamic_body> res{ http::status::unauthorized, 11 };
+	res_t res{ http::status::unauthorized, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
@@ -141,10 +135,10 @@ pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::stri
 
 
 	auto ret = obj.dump();
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
+
 
 
 	res.body() = value;
@@ -154,7 +148,7 @@ pof::base::net_manager::res_t pof::base::net_manager::auth_error(const std::stri
 
 pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::string& err) const
 {
-	http::response<http::dynamic_body> res{ http::status::unprocessable_entity, 11 };
+	res_t res{ http::status::unprocessable_entity, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
@@ -165,10 +159,9 @@ pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::
 
 
 	auto ret = obj.dump();
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
 
 
 	res.body() = value;
@@ -178,7 +171,7 @@ pof::base::net_manager::res_t pof::base::net_manager::unprocessiable(const std::
 
 pof::base::net_manager::res_t pof::base::net_manager::timeout_error() const
 {
-	http::response<http::dynamic_body> res{ http::status::request_timeout, 11 };
+	res_t res{ http::status::request_timeout, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/json");
 	res.keep_alive(true);
@@ -189,11 +182,9 @@ pof::base::net_manager::res_t pof::base::net_manager::timeout_error() const
 
 
 	auto ret = obj.dump();
-	http::dynamic_body::value_type value;
-	auto buffer = value.prepare(ret.size());
-	boost::asio::buffer_copy(buffer, boost::asio::buffer(ret));
-	value.commit(ret.size());
-
+	res_t::body_type::value_type value;
+	value.resize(ret.size());
+	std::copy(ret.begin(), ret.end(), value.begin());
 
 	res.body() = value;
 	res.prepare_payload();

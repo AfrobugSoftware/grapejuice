@@ -82,16 +82,9 @@ void grape::Application::route(const std::string& target, pof::base::net_manager
 
 std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req)
 {
-	const size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
-	auto& req_body = req.body();
-	std::string data;
-	data.resize(len);
-
-	auto buffer = req_body.data();
-	boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
-	req_body.consume(len);
-
-	return data;
+	auto& body = req.body();
+	std::string s(reinterpret_cast<const char*>(body.data()), body.size());
+	return s;
 }
 
 boost::asio::awaitable<void> grape::Application::RunUpdateTimer()

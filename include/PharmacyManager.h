@@ -33,6 +33,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 //branches
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), branches,
+	(boost::uuids::uuid, id)
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, address_id)
 	(std::string, name)
@@ -50,6 +51,15 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, street)
 	(std::string, num)
 	(std::string, add_info)
+)
+
+//pharmacy credentials
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), credentials,
+	(boost::uuids::uuid, account_id)
+	(boost::uuids::uuid, session_id)
+	(boost::uuids::uuid, pharm_id)
+	(boost::uuids::uuid, branch_id)
 )
 
 namespace grape {
@@ -145,9 +155,7 @@ namespace grape {
 		boost::asio::awaitable<bool> CheckIfInstitutionExists(const std::string& name);
 		boost::asio::awaitable<bool> CheckIfBranchExists(const std::string& bn, const boost::uuids::uuid& pid);
 		//thread safe, active pharmacy cache?
-		boost::concurrent_flat_map<boost::uuids::uuid, 
-			pof::base::data::row_t> mActivePharamcyBranches;
-		boost::concurrent_flat_map<boost::uuids::uuid,
-			pof::base::data::row_t> mActiveInstitutions;
+		boost::concurrent_flat_map<boost::uuids::uuid, grape::branches> mActivePharamcyBranches;
+		boost::concurrent_flat_map<boost::uuids::uuid, grape::institution> mActiveInstitutions;
 	};
 };

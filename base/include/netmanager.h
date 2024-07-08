@@ -22,16 +22,16 @@ namespace pof
 		class net_manager : private boost::noncopyable
 		{
 		public:
-			using callback = std::function<boost::asio::awaitable<http::response<http::dynamic_body>>(http::request<http::dynamic_body>&&, boost::urls::matches&&)>;
-			using req_t = http::request<http::dynamic_body>;
-			using res_t = http::response<http::dynamic_body>;
+			using req_t = http::request<http::vector_body<std::uint8_t>>;
+			using res_t = http::response<http::vector_body<std::uint8_t>>;
+			using callback = std::function<boost::asio::awaitable<res_t>(req_t&&, boost::urls::matches&&)>;
 			class httpsession : public boost::enable_shared_from_this<httpsession>
 			{
 				net_manager& manager;
 				beast::tcp_stream stream_;
 				beast::flat_buffer buffer_;
 
-				boost::optional<http::request_parser<http::dynamic_body>> parser;
+				boost::optional<http::request_parser<http::vector_body<std::uint8_t>>> parser;
 
 				void fail(beast::error_code ec, char const* what);
 				void do_read();

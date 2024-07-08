@@ -177,8 +177,9 @@ namespace grape
 				optv_ = boost::asio::buffer_cast<opt_fields::value_type*>(buf_);
 				buf_ += sizeof(opt_fields::value_type);
 			}
-
 			template<typename T, size_t N>
+				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T>
 			void operator()(const optional_field<T, N>& field) const {
 				if (optv_ == nullptr) throw std::logic_error("optional field comes before optional set");
 				opt_.set(N);
@@ -187,6 +188,7 @@ namespace grape
 			}
 			template<typename T>
 				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T>
 			void operator()(std::vector<T>&vec) const
 			{
 				(*this)(vec.size());
@@ -194,14 +196,88 @@ namespace grape
 					(*this)(v);
 				}
 			}
+		
 		};
 
+		class sizer {
+		public:
+			mutable size_t size = 0;
+			mutable opt_fields::bits_type opt_;
+
+			template<Integers T>
+			void operator()(const T& i) const {
+				size += sizeof(T);
+			}
+
+			void operator()(const boost::uuids::uuid& uuid)  const {
+				size += uuid.static_size();
+			}
+
+			void operator()(const std::string& str) const {
+				(*this)(static_cast<std::uint32_t>(str.size()));
+				size+= str.size();
+			}
+
+			void operator()(const pof::base::currency& cur) const {
+				size += cur.data().size();
+			}
+			template<Pods P>
+			void operator()(const P& p) const {
+				size += sizeof(P);
+			}
+
+			template<size_t N>
+			void operator()(const std::array<char, N>& fixed) const {
+				size += N;
+			}
+
+			template<FusionStruct T>
+			void operator()(const T& val) const {
+				boost::fusion::for_each(val, *this);
+			}
+
+			template<typename T, size_t N>
+			void operator()(const opt_fields& t) const {
+				opt_= opt_fields::bits_type(t);
+				size += sizeof(opt_fields::value_type);
+			}
+
+			template<typename T, size_t N>
+				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T>
+				void operator()(const optional_field<T, N>&field) const {
+				if (!opt_.has_value()) throw std::logic_error("optional field comes before optional set");;
+				if ((*opt_)[N]) {
+					(*this)(*field);
+				}
+			}
+
+			template<typename T>
+				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T>
+				void operator()(std::vector<T>&vec) const
+			{
+				using type = std::decay_t<T>;
+				if constexpr (std::disjunction_v<std::is_same<type, std::string>,
+				  boost::mpl::is_sequence<T>>) {
+					for (auto& v : vec) {
+						(*this)(v);
+					}
+				}
+				else if constexpr (std::disjunction_v<std::is_integral<T>, std::is_floating_point<T>,
+				 std::is_enum<T>, std::is_pod<T>, std::is_array<T>>) {
+					size += vec.size() * sizeof(T)
+				}
+			}
+		};
+
+
 		template<typename T>
-		T read(boost::asio::const_buffer b) {
+		std::pair<T, boost::asio::const_buffer> read(boost::asio::const_buffer b) {
 			reader r(std::move(b));
 			T res{};
 			boost::fusion::for_each(res, r);
-			return res;
+			return std::make_pair(res, r.buf_);
 		}
 
 		template<typename T>
@@ -209,6 +285,13 @@ namespace grape
 			writer w(std::move(buf));
 			boost::fusion::for_each(val, w);
 			return w.buf_;
+		}
+
+		template<typename T>
+		size_t get_size(const T& val) {
+			sizer s{};
+			boost::fusion::for_each(val, s);
+			return s.size;
 		}
 	}
 }
