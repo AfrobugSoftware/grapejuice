@@ -32,7 +32,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 
 //branches
 BOOST_FUSION_DEFINE_STRUCT(
-	(grape), branches,
+	(grape), branch,
 	(boost::uuids::uuid, id)
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, address_id)
@@ -53,13 +53,18 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, add_info)
 )
 
-//pharmacy credentials
+//branch collection
 BOOST_FUSION_DEFINE_STRUCT(
-	(grape), credentials,
-	(boost::uuids::uuid, account_id)
-	(boost::uuids::uuid, session_id)
-	(boost::uuids::uuid, pharm_id)
-	(boost::uuids::uuid, branch_id)
+	(grape)(collection),
+	branches,
+	(std::vector<grape::branch>, group)
+)
+
+//pharmacy collection
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape)(collection),
+	pharmacies,
+	(std::vector<grape::pharmacy>, group)
 )
 
 namespace grape {
@@ -85,45 +90,6 @@ namespace grape {
 			NONE = 0x00,
 			HOSPITAL = 0x02,
 			INSURANCE = 0x04,
-		};
-
-		//institution
-		enum {
-			INSTITUTION_ID,
-			INSTITUTION_NAME,
-			INSTITUTION_TYPE,
-			INSTITUTION_ADDRESS_ID,
-			INSTITUTION_INFO,
-		};
-
-
-		//pharmacy
-		enum {
-			PHARMACY_ID,
-			PHARMACY_NAME,
-			PHARMACY_ADDRESS_ID,
-			PHARMACY_INFO,
-		};
-
-		//pharmacy branches
-		enum {
-			BRANCH_ID,
-			BRANCH_PHARMACY_ID,
-			BRANCH_ADDRESS_ID,
-			BRANCH_NAME,
-			BRANCH_STATE,
-			BRANCH_INFO,
-		};
-
-		//address
-		enum {
-			ADDRESS_ID,
-			COUNTRY,
-			STATE,
-			LGA,
-			STREET,
-			NUM,
-			ADD_INFO, //Contains a json with polar coordinates, probably from goolge map
 		};
 
 		//routes handles
@@ -155,7 +121,7 @@ namespace grape {
 		boost::asio::awaitable<bool> CheckIfInstitutionExists(const std::string& name);
 		boost::asio::awaitable<bool> CheckIfBranchExists(const std::string& bn, const boost::uuids::uuid& pid);
 		//thread safe, active pharmacy cache?
-		boost::concurrent_flat_map<boost::uuids::uuid, grape::branches> mActivePharamcyBranches;
+		boost::concurrent_flat_map<boost::uuids::uuid, grape::branch> mActivePharamcyBranches;
 		boost::concurrent_flat_map<boost::uuids::uuid, grape::institution> mActiveInstitutions;
 	};
 };

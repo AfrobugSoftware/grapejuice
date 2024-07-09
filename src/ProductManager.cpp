@@ -25,7 +25,7 @@ void grape::ProductManager::CreateProductTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS products (
-				id char(16) not null unique,
+				id binary(16) not null,
 				serial_num integer,
 				name text,
 				generic_name text,
@@ -34,6 +34,8 @@ void grape::ProductManager::CreateProductTable()
 				strength text,
 				strength_type text,
 				usage_info text,
+				description text,
+				indications text,
 				package_size integer,
 				sideeffects text,
 				barcode text,
@@ -55,16 +57,16 @@ void grape::ProductManager::CreateInventoryTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS inventory (
-				pharmacy_id char(16) not null,
-				branch_id char(16) not null,
-				inventory_id char(16),
-				proudct_id  char(16),
+				pharmacy_id binary(16) not null,
+				branch_id binary(16) not null,
+				inventory_id binary(16),
+				proudct_id  binary(16),
 				expire_date datetime,
 				input_date datetime,
 				stock_count integer,
-				cost char(17),
-				supplier_uuid char(16),
-				lot_number integer
+				cost binary(17),
+				supplier_uuid binary(16),
+				lot_number text
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -81,12 +83,12 @@ void grape::ProductManager::CreatePackTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS packs (
-				pharmacy_id char(16),
-				branch_id char(16),
-				pack_id char(16),
-				product_id char(16),
+				pharmacy_id binary(16),
+				branch_id binary(16),
+				pack_id binary(16),
+				product_id binary(16),
 				quantity integer,
-				exact_cost char(17)
+				exact_cost binary(17)
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -103,7 +105,7 @@ void grape::ProductManager::CreateSupplierTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS suppliers (
-			supplier_id char(16),
+			supplier_id binary(16),
 			supplier_name text,
 			date_created datetime,
 			date_modified datetime,
@@ -124,8 +126,8 @@ void grape::ProductManager::CreateCategoryTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXSITS categories (
-				pharmacy_id char(16),
-				branch_id char(16),
+				pharmacy_id binary(16),
+				branch_id binary(16),
 				category_id integer autoincrement,
 				name text
 			);)");
@@ -145,12 +147,12 @@ void grape::ProductManager::CreateInvoiceTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXSITS invoices (
-				pharmacy_id char(16),
-				branch_id char(16),
-				supplier_id char(16),
-				id char(16),
-				product_id char(16),
-				inventory_id char(16),
+				pharmacy_id binary(16),
+				branch_id binary(16),
+				supplier_id binary(16),
+				id binary(16),
+				product_id binary(16),
+				inventory_id binary(16),
 				input_date datetime
 		);)");
 		auto fut = query->get_future();
@@ -168,9 +170,9 @@ void grape::ProductManager::CreateExpiredTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS expired (
-				pharmacy_id char(16),
-				branch_id char(16),
-				product_id char(16),
+				pharmacy_id binary(16),
+				branch_id binary(16),
+				product_id binary(16),
 				date datetime,
 				stock_count integer,
 			);)");
@@ -189,11 +191,11 @@ void grape::ProductManager::CreatePharmacyProductTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS pharma_products (
-				pharmacy_id char(16),
-				branch_id char(16),
-				product_id char(16),
-				product_unitprice char(17),
-				product_costprice char(17),
+				pharmacy_id binary(16),
+				branch_id binary(16),
+				product_id binary(16),
+				product_unitprice binary(17),
+				product_costprice binary(17),
 				stock_count largeint,
 				min_stock_count largeint,
 				date_added datetime,
@@ -226,10 +228,10 @@ void grape::ProductManager::SetRoutes()
 	auto app = grape::GetApp();
 	app->route("/product/add"s, std::bind_front(&grape::ProductManager::OnAddProduct, this));
 	app->route("/product/update"s, std::bind_front(&grape::ProductManager::OnUpdateProduct, this));
-	app->route("/product/getproducts/{pid_bid}"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
-	app->route("/product/removeproducts/{pid_bid}"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
-	app->route("/product/addproducts/{pid_bid}"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
-	app->route("/product/addformulary/{pid_bid}"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
+	app->route("/product/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
+	app->route("/product/removeproducts"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
+	app->route("/product/addproducts"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
+	app->route("/product/addformulary"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	
 }
 
@@ -238,28 +240,19 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Cannot authorize user");
-		}
 		if (req.method() != http::verb::put) {
 			co_return app->mNetManager.bad_request("Put method expected");
 		}
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
-		
-		auto prodbuf = req.body().data();
-		std::vector<char> buf(boost::asio::buffer_size(prodbuf));
-		boost::asio::buffer_copy(boost::asio::buffer(buf), prodbuf);
-		pof::base::data prodData;
-
-		//unpack the payload
-		pof::base::unpacker{prodData}(buf);
-
-		if (prodData.empty()) {
-			co_return app->mNetManager.unprocessiable("Product payload is corrupt/not processiable"s);
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
-
+		auto&& [products, buf2] = grape::serial::read<grape::collection::products>(buf);
 		//wrtie product to database
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 		R"(INSERT INTO products (
@@ -272,44 +265,40 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				strength,
 				strength_type,
 				usage_info,
+				description,
 				package_size,
 				sideeffects,
 				barcode,
-				min_stock_count, manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?);)");
-		query->m_arguments.resize(prodData.size());
-		for (size_t i = 0; i < prodData.size(); i++) {
+				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?);)");
+		query->m_arguments.resize(products.group.size());
+		for (size_t i = 0; i < products.group.size(); i++) {
 			auto& arg = query->m_arguments[i];
 			arg.reserve(19);
-			auto& prod = prodData[i];
-			auto& v = prod.first;
+			auto& prod = products.group[i];
 
-			auto& productid = boost::variant2::get<boost::uuids::uuid>(v[0]); //product id
 
-			arg.emplace_back(boost::mysql::field(boost::mysql::blob(productid.begin(), productid.end())));
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::uint64_t>(v[1]))); //product serial number
+			arg.emplace_back(boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())));
+			arg.emplace_back(boost::mysql::field(prod.serial_num)); //product serial number
 			
-			std::string& name = boost::variant2::get<std::string>(v[1]); //product name
-			boost::trim(name);
-			std::transform(name.begin(), name.end(), name.begin(), [](char c) -> char {return std::tolower(c); });
-
-			arg.emplace_back(boost::mysql::field(name)); 
+			boost::trim(prod.name);
+			std::transform(prod.name.begin(), prod.name.end(), prod.name.begin(), [](char c) -> char {return std::tolower(c); });
+			arg.emplace_back(boost::mysql::field(prod.name)); 
 			
-			std::string& gen_name = boost::variant2::get<std::string>(v[2]);
-			boost::trim(gen_name);
-			std::ranges::transform(gen_name, gen_name.begin(), [](char c) -> char {return std::tolower(c);  });
-			arg.emplace_back(boost::mysql::field(gen_name)); //generic name
+			boost::trim(prod.generic_name);
+			std::ranges::transform(prod.generic_name, prod.generic_name.begin(), [](char c) -> char {return std::tolower(c);  });
+			arg.emplace_back(boost::mysql::field(prod.generic_name)); //generic name
 
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[3]))); //class OTC, POM, P
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[4]))); // formulation
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[5]))); // strength
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[6]))); //strength type
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[7]))); //usage info
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[8]))); //description
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[9]))); //health conditions
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::uint32_t>(v[10]))); //package size
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[11]))); // side effects
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[12]))); // barcode
-			arg.emplace_back(boost::mysql::field(boost::variant2::get<std::uint64_t>(v[13]))); // minimum stock count
+			arg.emplace_back(boost::mysql::field(prod.class_)); //class OTC, POM, P
+			arg.emplace_back(boost::mysql::field(prod.formulation)); // formulation
+			arg.emplace_back(boost::mysql::field(prod.strength)); // strength
+			arg.emplace_back(boost::mysql::field(prod.strength_type)); //strength type
+			arg.emplace_back(boost::mysql::field(prod.usage_info)); //usage info
+			arg.emplace_back(boost::mysql::field(prod.description)); //description
+			arg.emplace_back(boost::mysql::field(prod.indications)); //health conditions
+			arg.emplace_back(boost::mysql::field(prod.package_size)); //package size
+			arg.emplace_back(boost::mysql::field(prod.sideeffects)); // side effects
+			arg.emplace_back(boost::mysql::field(prod.barcode)); // barcode
+			arg.emplace_back(boost::mysql::field(prod.manufactures_name)); // manufacturres name
 		}
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(60s);
@@ -328,26 +317,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		(void)fut.get();
-
-
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/json");
-		res.keep_alive(req.keep_alive());
-
-		js::json jobj = js::json::object();
-		jobj["result_status"] = "Successful"s;
-		jobj["result_message"] = "Products added sucessfully"s;
-
-		auto sendData = jobj.dump();
-		boost::beast::http::dynamic_body::value_type value{};
-		auto buf_value = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buf_value, boost::asio::buffer(sendData));
-		value.commit(sendData.size());
-
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
+		co_return app->OkResult("Successfully added product");
 	}
 	catch (const js::json::exception& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
@@ -372,22 +342,18 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 		if (!app->mAccountManager.AuthuriseRequest(req)) {
 			co_return app->mNetManager.auth_error("Cannot authorize user");
 		}
-	
-		auto prodbuf = req.body().data();
 		
-		std::vector<char> buf(boost::asio::buffer_size(prodbuf));
-		boost::asio::buffer_copy(boost::asio::buffer(buf), prodbuf);
-		pof::base::data prodData;
-
-		//unpack the payload
-		pof::base::unpacker{ prodData }(buf);
-		if (prodData.empty() || prodData.size() > 1) {
-			co_return app->mNetManager.unprocessiable("Product payload is corrupt/not processiable"s);
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
-		auto& prod = *prodData.begin();
+		auto&& [product_opt, buf2] = grape::serial::read<grape::product_opt>(buf);
+
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
 		query->m_arguments.resize(1);
-		constexpr static const std::array<std::string_view, PRODUCT_MAX - 1> names = {
+		constexpr static const std::array<std::string_view, PRODUCT_MAX> names = {
 			"serial_num",
 			"name",
 			"generic_name",
@@ -399,65 +365,20 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 			"package_size",
 			"stock_count",
 			"barcode",
-			"min_stock_count"
+			"manufactures_name"
 		};
 
 		std::ostringstream os;
 		os << "UPDATE products SET";
-		auto updateFlag = prod.second.second;
-		std::vector<size_t> upIdx;
-		for (int i = 1; i < PRODUCT_MAX - 2; i++) {
-			if (updateFlag.test(i)) {
-				if (upIdx.size() != 0) {
-					os << ", ";
-				}
-				upIdx.push_back(i);
-				os << names[i] << "= ?";
-			}
-		}
-		os << "WHERE id = ?;";
-		size_t i = 1;
-		auto& meta = prodData.get_metadata();
-		auto& v = prod.first;
-		for (size_t d : upIdx) {
-			auto kind = meta[d];
-			switch (kind)
-			{
-			case pof::base::data::kind::uint64:
-				query->m_arguments[0].emplace_back(boost::mysql::field((boost::variant2::get<std::uint64_t>(v[d]))));
-				break;
-			case pof::base::data::kind::datetime:
-				query->m_arguments[0].emplace_back(boost::mysql::field(
-						boost::mysql::datetime(std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>
-						((boost::variant2::get<pof::base::data::datetime_t>(v[d]))))));
-				break;
-			case pof::base::data::kind::text:
-				query->m_arguments[0].emplace_back(boost::mysql::field(boost::variant2::get<std::string>(v[d])));
-				break;
-			case pof::base::data::kind::uuid:
-			{
-				auto& uuid = boost::variant2::get<boost::uuids::uuid>(v[d]);
-				query->m_arguments[0].emplace_back(boost::mysql::field(boost::mysql::blob(uuid.begin(), uuid.end())));
-				break;
-			}
-			case pof::base::data::kind::uint32:
-				query->m_arguments[0].emplace_back(boost::mysql::field(boost::variant2::get<std::uint32_t>(v[d])));
-				break;
-			case pof::base::data::kind::currency:
-			{
-				auto& curr = boost::variant2::get<pof::base::currency>(v[d]);
-				query->m_arguments[0].emplace_back(boost::mysql::field(boost::mysql::blob(curr.data().begin(),
-					curr.data().end())));
-			}
-				break;
-			default:
-				break;
-			}
-			i++;
-		}
-		auto& productId = boost::variant2::get<boost::uuids::uuid>(v[0]);
+		if (product_opt.name.has_value()) {
+			os << "name = ?";
+			query->m_arguments[0].push_back(boost::);
 
-		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(productId.begin(), productId.end())));
+		}
+		
+		os << "WHERE id = ?;";
+		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(product_opt.id.begin(), product_opt.id.end())));
+
 		
 		query->m_sql = std::move(os.str());
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);

@@ -6,7 +6,88 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/fusion/include/define_struct.hpp>
+#include "serialiser.h"
+
 #include <algorithm>
+//products
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), product, 
+	(boost::uuids::uuid, id)
+	(std::uint64_t, serial_num)
+	(std::string, name)
+	(std::string, generic_name)
+	(std::string, class_)
+	(std::string, formulation)
+	(std::string, strength)
+	(std::string, strength_type)
+	(std::string, usage_info)
+	(std::string, description)
+	(std::string, indications)
+	(std::uint64_t, package_size)
+	(std::string, sideeffects)
+	(std::string, barcode)
+	(std::string, manufactures_name)
+)
+
+template<size_t N>
+using opt_field_string = grape::optional_field<std::string, N>;
+
+template<size_t N>
+using opt_field_uint64_t = grape::optional_field<std::uint64_t, N>;
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), product_opt,
+	(boost::uuids::uuid, id)
+	(std::uint64_t, serial_num)
+	(grape::opt_fields, fields)
+	(opt_field_string<0>, name)
+	(opt_field_string<1>, generic_name)
+	(opt_field_string<2>, class_)
+	(opt_field_string<3>, formulation)
+	(opt_field_string<4>, strength)
+	(opt_field_string<5>, strength_type)
+	(opt_field_string<6>, usage_info)
+	(opt_field_string<7>, description)
+	(opt_field_string<8>, indications)
+	(opt_field_uint64_t<9>, package_size)
+	(opt_field_string<10>, sideeffects)
+	(opt_field_string<11>, barcode)
+	(opt_field_string<12>, manufactures_name)
+)
+
+//inventory
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), inventory,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, id)
+	(boost::uuids::uuid, product_id)
+	(std::chrono::system_clock::time_point, expire_date)
+	(std::chrono::system_clock::time_point, input_date)
+	(std::uint64_t, stock_count)
+	(pof::base::currency, cost)
+	(boost::uuids::uuid, supplier_id)
+	(std::string, lot_number)
+)
+
+//packs
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), pack,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, id)
+	(boost::uuids::uuid, product_id)
+
+)
+
+
+//collections
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape)(collection), products,
+	(std::vector<grape::product>, group)
+)
+
 
 namespace grape {
 	class ProductManager : public boost::noncopyable {
@@ -17,6 +98,7 @@ namespace grape {
 			FORMULARY_NAME,
 			FORMULARY_CREATED_BY_NAME,
 			FORMULARY_CREATED_DATE,
+			FORMULARY_VERSION,
 			FORMULARY_ACCESS_LEVEL
 		};
 

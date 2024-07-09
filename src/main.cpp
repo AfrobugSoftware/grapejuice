@@ -17,16 +17,16 @@ int main(int argc, char** argv)
     auto app = grape::GetApp();
     app->Init();
 
-    app->route("/", [](http::request<http::dynamic_body>&& req, 
-        boost::urls::matches&& m) -> boost::asio::awaitable<http::response<http::dynamic_body>> {
-            http::response<http::dynamic_body> res{ http::status::ok, 11 };
+    app->route("/", [](pof::base::net_manager::req_t&& req, 
+        boost::urls::matches&& m) -> boost::asio::awaitable<pof::base::net_manager::res_t> {
+            pof::base::net_manager::res_t res{ http::status::ok, 11 };
 
            res.set(http::field::server, USER_AGENT_STRING);
            res.set(http::field::content_type, "text/html");
            res.keep_alive(req.keep_alive());
 
 
-           http::dynamic_body::value_type value;
+           pof::base::net_manager::res_t::body_type::value_type value;
            const auto data = R"(
  <!DOCTYPE html>
 <html lang="en">
@@ -81,38 +81,13 @@ int main(int argc, char** argv)
 </body>
 </html>
             )"s;
-           auto buffer = value.prepare(data.size());
-           boost::asio::buffer_copy(buffer, boost::asio::buffer(data));
-           value.commit(data.size());
+           value.resize(data.size());
+           std::copy(data.begin(), data.end(), value.begin());
 
-           res.body() = value;
+           res.body() = std::move(value);
            res.prepare_payload();
            co_return res;
     });
-
-    app->route("/about/{path}/{second}", [&](http::request<http::dynamic_body>&& req, boost::urls::matches&& m)
-        -> boost::asio::awaitable<http::response<http::dynamic_body>> {
-            auto p = m["path"];
-            auto a = m["second"];
-            http::response<http::dynamic_body> res{ http::status::ok, 11 };
-
-            res.set(http::field::server, USER_AGENT_STRING);
-            res.set(http::field::content_type, "text/html");
-            res.keep_alive(req.keep_alive());
-
-            http::dynamic_body::value_type value;
-            std::ostringstream os;
-            os << "<h1>This is grape juice: "s << std::string(p) << " " << "</h1>" << std::endl;
-            os << "<p>Welcome to the server</p>";
-            const auto data = os.str();
-            auto buffer = value.prepare(data.size());
-            boost::asio::buffer_copy(buffer, boost::asio::buffer(data));
-            value.commit(data.size());
-
-            res.body() = value;
-            res.prepare_payload();
-            co_return res;
-     });
 
     app->Run();
     int a;

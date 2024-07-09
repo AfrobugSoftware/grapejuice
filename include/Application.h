@@ -4,6 +4,8 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <boost/signals2/signal.hpp>
+#include <boost/fusion/include/define_struct.hpp>
+
 #include <regex>
 
 
@@ -18,7 +20,27 @@
 //protocol serialiser
 #include "serialiser.h"
 
+//operation result message
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), result,
+	(std::string, status)
+	(std::string, message)
+)
+
+//pharmacy credentials
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), credentials,
+	(boost::uuids::uuid, account_id)
+	(boost::uuids::uuid, session_id)
+	(boost::uuids::uuid, pharm_id)
+	(boost::uuids::uuid, branch_id)
+)
+
+
 namespace grape {
+	using request = pof::base::net_manager::req_t;
+	using response = pof::base::net_manager::res_t;
+
 	namespace js = nlohmann;
 	namespace fs = std::filesystem;
 
@@ -44,6 +66,25 @@ namespace grape {
 
 		
 		std::string ExtractString(pof::base::net_manager::req_t& req);
+
+		grape::response OkResult(const std::string& message, const std::string& status = "Successful"s,
+			 bool keep_alive = true);
+
+		template<typename T>
+			requires grape::FusionStruct<T>
+		grape::response OkResult(const T& data, bool keep_alive = true) {
+			grape::response res{ http::status::ok, 11 };
+			res.set(http::field::server, USER_AGENT_STRING);
+			res.set(http::field::content_type, "application/octlet-stream");
+			res.keep_alive(keep_alive);
+
+			grape::response::body_type::value_type value(grape::serial::get_size(data), 0x00);
+			grape::serial::write(boost::asio::buffer(value), data);
+
+			res.body() = std::move(value);
+			res.prepare_payload();
+			return res;
+		}
 
 		std::string mServerName; 
 		std::shared_ptr<pof::base::databasemysql> mDatabase;

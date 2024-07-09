@@ -3,8 +3,12 @@
 #include <boost/fusion/include/adapter.hpp>
 #include <boost/fusion/include/for_each.hpp>
 #include <boost/fusion/include/is_sequence.hpp>
+#include <boost/fusion/algorithm/transformation.hpp>
+#include <boost/fusion/include/transformation.hpp>
+#include <boost/mpl/range_c.hpp>
 #include <boost/uuid/uuid.hpp>
 
+#include "Data.h"
 #include "currency.h"
 
 #include <algorithm>
@@ -43,9 +47,23 @@ namespace grape
 	template<typename T, size_t N>
 	struct optional_field : std::optional<T> {
 		constexpr static const size_t bit = N;
+		using value_type = T;
 	};
 
 	using opt_fields = optional_field_set<std::uint16_t>;
+
+	template<typename T>
+	class is_optional_field : public std::false_type {};
+
+	template<typename T, size_t N>
+	class is_optional_field<optional_field<T, N>> : public std::true_type {};
+
+	template<typename T>
+	class is_optional_field_set : public std::false_type {};
+
+	template<>
+	class is_optional_field_set<opt_fields> : public std::true_type {};
+
 
 	namespace serial {
 		class reader {
@@ -59,6 +77,14 @@ namespace grape
 			void operator()(T& i) const {
 				i = bswap(*boost::asio::buffer_cast<const T*>(buf_));
 				buf_ += sizeof(T);
+			}
+
+			void operator()(std::chrono::system_clock::time_point& tp) const {
+				tp = std::chrono::system_clock::time_point{
+					std::chrono::system_clock::duration{
+							bswap(*boost::asio::buffer_cast<std::chrono::system_clock::rep*>(buf_))}
+					};
+				buf_ += sizeof(std::chrono::system_clock::rep);
 			}
 
 			void operator()(boost::uuids::uuid& uuid) const {
@@ -137,6 +163,12 @@ namespace grape
 			void operator()(const T& i) const {
 				*boost::asio::buffer_cast<T*>(buf_) = bswap(i);
 				buf_ += sizeof(T);
+			}
+
+			void operator()(const std::chrono::system_clock::time_point& tp) const {
+				*boost::asio::buffer_cast<std::chrono::system_clock::rep*>(buf_)
+					= bswap(tp.time_since_epoch().count());
+				buf_ += sizeof(std::chrono::system_clock::rep);
 			}
 
 			void operator()(const boost::uuids::uuid& uuid)  const {
@@ -271,8 +303,37 @@ namespace grape
 			}
 		};
 
-
+	
 		template<typename T>
+			requires FusionStruct<T>
+		auto build(const pof::base::data::row_t::first_type& row) -> T&& {
+			typedef boost::mpl::range_c<unsigned, 0, boost::mpl::size<T>::value> range;
+			T ret{};
+			boost::fusion::for_each(range(), [&](auto i) {
+				using constant = std::decay_t<decltype(i)>;
+				using arg_type = std::decay_t<decltype(boost::fusion::at<constant>(ret))>;
+				if constexpr (std::is_optional_field_set<arg_type>::value) {
+					//skip types with feild_set
+				}
+				else if constexpr (std::is_optional_field<arg_type>::value) {
+					using get_type = typename arg_type::value_type;
+					if (boost::variant2::holds_alternative<get_type>(row[constant::value])) {
+						boost::fusion::at<constant>(ret).value() =
+							std::move(boost::variant2::get<get_type>(row[constant::value]));
+					}
+				}
+				else {
+					if (boost::variant2::holds_alternative<arg_type>(row[constant::value])) {
+						boost::fusion::at<constant>(ret) =
+							std::move(boost::variant2::get<arg_type>(row[constant::value]));
+					}
+				}
+			});
+			return ret;
+		}
+		
+
+		template<FusionStruct T>
 		std::pair<T, boost::asio::const_buffer> read(boost::asio::const_buffer b) {
 			reader r(std::move(b));
 			T res{};
@@ -280,7 +341,7 @@ namespace grape
 			return std::make_pair(res, r.buf_);
 		}
 
-		template<typename T>
+		template<FusionStruct T>
 		boost::asio::mutable_buffer write(boost::asio::mutable_buffer buf, const T& val) {
 			writer w(std::move(buf));
 			boost::fusion::for_each(val, w);
@@ -288,6 +349,7 @@ namespace grape
 		}
 
 		template<typename T>
+			requires FusionStruct<T>
 		size_t get_size(const T& val) {
 			sizer s{};
 			boost::fusion::for_each(val, s);

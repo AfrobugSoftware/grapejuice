@@ -87,6 +87,26 @@ std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req
 	return s;
 }
 
+grape::response grape::Application::OkResult(const std::string& message, 
+		const std::string& status, bool keep_alive)
+{
+	grape::response res{ http::status::ok, 11 };
+	res.set(http::field::server, USER_AGENT_STRING);
+	res.set(http::field::content_type, "application/octlet-stream");
+	res.keep_alive(keep_alive);
+
+	grape::result result;
+	result.message = message;
+	result.status = status;
+
+	grape::response::body_type::value_type value(grape::serial::get_size(result), 0x00);
+	grape::serial::write(boost::asio::buffer(value), result);
+
+	res.body() = std::move(value);
+	res.prepare_payload();
+	return res;
+}
+
 boost::asio::awaitable<void> grape::Application::RunUpdateTimer()
 {
 	mUpdateTimer = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);

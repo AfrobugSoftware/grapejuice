@@ -23,9 +23,9 @@ void grape::PharmacyManager::CreatePharmacyTable()
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 		R"(
 			CREATE TABLE IF NOT EXISTS pharmacy (
-			pharmacy_id char(16) not null,
+			pharmacy_id binary(16) not null,
 			pharmacy_name text,
-			pharamcy_address blob,
+			pharamcy_address binary(16),
 			pharmacy_info text
 		);)");
 	auto fut = query->get_future();
@@ -44,10 +44,10 @@ void grape::PharmacyManager::CreateInstitution()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS institutions (
-				id char(16),
+				id binary(16) not null,
 				name text,
 				type tinyint,
-				address_id char(16),
+				address_id binary(16),
 				info text
 			);)");
 		auto fut = query->get_future();
@@ -67,9 +67,9 @@ void grape::PharmacyManager::CreateBranchTable()
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(
 			CREATE TABLE IF NOT EXSITS branches (
-			branch_id char(16),
-			pharmacy_id char(16),
-			address_id blob,
+			branch_id binary(16),
+			pharmacy_id binary(16),
+			address_id binary(16),
 			branch_name text,
 			branch_state integer,
 			branch_info text
@@ -89,7 +89,7 @@ void grape::PharmacyManager::CreateAddressTable()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS address (
-			address_id char(16) not null,
+			address_id binary(16) not null,
 			country text,
 			state text,
 			lga text,
@@ -182,24 +182,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 		d = fut.get();
 
-		pof::base::net_manager::res_t res{ http::status::ok, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octlet-stream");
-		res.keep_alive(req.keep_alive());
-		
-		pof::base::net_manager::res_t::body_type::value_type value;
 		pharmacy.address_id = address.id;
-		const size_t size = grape::serial::get_size(pharmacy);
-		value.resize(size);
-		
-		grape::serial::write(boost::asio::buffer(value), pharmacy);
 
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
+		co_return app->OkResult(pharmacy);
 
 	}
-	catch (const js::json::exception& jerr) {
+	catch (const std::logic_error& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (std::exception& exp) {
@@ -218,7 +206,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 
 	}
-	catch (const js::json::exception& jerr) {
+	catch (const std::logic_error& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (std::exception& exp) {
@@ -233,10 +221,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 	auto app = grape::GetApp();
 	thread_local static boost::uuids::random_generator_mt19937 uuidGen;
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Account not authorizesd");
-		}
-
+		
 		if (req.method() != http::verb::post) {
 			co_return app->mNetManager.bad_request("Method should be post method"s);
 		}
@@ -244,8 +229,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
 
-		auto& req_body = req.body();
-		auto&& [branch, buf] = grape::serial::read<grape::branches>(boost::asio::buffer(req_body));
+		//verify the request
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && 
+				app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [branch, buf2] = grape::serial::read<grape::branch>(boost::asio::buffer(buf));
 		
 		//extract data from the object
 		branch.id = uuidGen();
@@ -308,26 +300,9 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		d = fut.get();
-
-
-
-		pof::base::net_manager::res_t res{ http::status::created, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octlet-stream");
-		res.keep_alive(req.keep_alive());
-
-		pof::base::net_manager::res_t::body_type::value_type value;
-		branch.address_id = address.id;
-		const size_t size = grape::serial::get_size(branch);
-		value.resize(size);
-
-		grape::serial::write(boost::asio::buffer(value), branch);
-
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
+		co_return app->OkResult(branch);
 	}
-	catch (const js::json::exception& jerr) {
+	catch (const std::logic_error &jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
@@ -401,29 +376,13 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				co_return app->mNetManager.server_error("Cannot set branch to open");
 			}
 
-			mActivePharamcyBranches.emplace(cred.branch_id, );
+			auto& row = *(d->begin());
+			grape::branch&& branch = grape::serial::build<grape::branch>(row.first);
+			mActivePharamcyBranches.emplace(cred.branch_id, branch);
 		}
-
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/json");
-		res.keep_alive(req.keep_alive());
-
-		js::json jobj = js::json::object();
-		jobj["result_status"] = "Successful"s;
-		jobj["result_message"] = "Branch state has been set sucessfully"s;
-		 
-		auto sendData = jobj.dump();
-		boost::beast::http::dynamic_body::value_type value{};
-		auto buf = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buf, boost::asio::buffer(sendData));
-		value.commit(sendData.size());
-
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
+		co_return app->OkResult("Successful", "Successfully changed branch state");
 	}
-	catch (const js::json::exception& jerr) {
+	catch (const std::logic_error& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
@@ -436,9 +395,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try{
-		
-
-		co_return pof::base::net_manager::res_t{};
+		co_return app->OkResult("Successfully destoried pharmacy");
 	}
 	catch (const js::json::exception& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
@@ -457,8 +414,13 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (!app->mAccountManager.AuthuriseRequest(req)) {
 			co_return app->mNetManager.auth_error("Account not authorized");
 		}
-		js::json obj = js::json::parse(app->ExtractString(req));
-		boost::uuids::uuid pharmacyId = boost::lexical_cast<boost::uuids::uuid>(obj["pharmacy_id"]);
+
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
 
 		//create the query
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
@@ -466,7 +428,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-					boost::mysql::field(boost::mysql::blob(pharmacyId.begin(), pharmacyId.end()))
+					boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
 		}};
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -479,8 +441,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (d == nullptr && d->empty()) {
 			co_return app->mNetManager.not_found("No branches for pharmacy");
 		}
+		grape::collection::branches branches;
+		std::vector<grape::branch>& group = branches.group;
+		group.reserve(d->size());
+		for (auto& row : *d) {
+			auto&& b = grape::serial::build<grape::branch>(row.first);
+			group.emplace_back(std::move(b));
+		}
 
-
+		co_return app->OkResult(branches);
 	}
 	catch (const js::json::exception& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
@@ -494,17 +463,14 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::PharmacyManager::On
 {
 	auto app = grape::GetApp();
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Account not authorizesd");
-		}
-
 		if (req.method() != http::verb::post) {
 			co_return app->mNetManager.bad_request("Method should be post method"s);
 		}
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
-		
+		auto& body = req.body();
+		auto&& [institution, buf] = grape::serial::read<grape::institution>(boost::asio::buffer(body));
 	}
 	catch (const js::json::exception& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());

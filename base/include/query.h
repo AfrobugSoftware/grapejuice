@@ -169,7 +169,6 @@ namespace pof {
 									break;
 								
 								case boost::mysql::column_type::bit:
-								case boost::mysql::column_type::binary:
 								case boost::mysql::column_type::varbinary:
 								case boost::mysql::column_type::blob:
 								{
@@ -188,10 +187,10 @@ namespace pof {
 								case boost::mysql::column_type::timestamp:
 									v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
 									break;
-								case boost::mysql::column_type::char_:
+								case boost::mysql::column_type::binary:
 								{
 									//is char converted to blob or stirng
-									auto collect = row.at(i).as_string();
+									auto collect = row.at(i).as_blob();
 									const size_t size = collect.size();
 									switch (size)
 									{
@@ -360,7 +359,6 @@ namespace pof {
 									
 									break;
 								case boost::mysql::column_type::bit:
-								case boost::mysql::column_type::binary:
 								case boost::mysql::column_type::varbinary:
 								case boost::mysql::column_type::blob:
 									datameta.emplace_back(pof::base::data::kind::blob);
@@ -408,7 +406,6 @@ namespace pof {
 										break;
 
 									case boost::mysql::column_type::bit:
-									case boost::mysql::column_type::binary:
 									case boost::mysql::column_type::varbinary:
 									case boost::mysql::column_type::blob:
 									{
@@ -428,9 +425,9 @@ namespace pof {
 										v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
 											pof::base::data::clock_t::duration>(row.at(i).as_datetime().as_time_point())); // wrong type
 										break;
-									case boost::mysql::column_type::char_:
+									case boost::mysql::column_type::binary:
 									{
-										auto collect = row.at(i).as_string();
+										auto collect = row.at(i).as_blob();
 										const size_t size = collect.size();
 										switch (size)
 										{

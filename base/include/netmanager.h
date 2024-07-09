@@ -75,7 +75,7 @@ namespace pof
 			res_t auth_error(const std::string& err) const;
 			res_t unprocessiable(const std::string& err) const;
 			res_t timeout_error() const;
-
+		
 			void run();
 
 			inline void bind_addr(boost::asio::ip::tcp::endpoint ep) { m_endpoint = ep; };
