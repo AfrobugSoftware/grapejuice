@@ -37,7 +37,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, address_id)
 	(std::string, name)
-	(std::uint8_t, state)
+	(std::uint32_t, state)
 	(std::string, info)
 )
 

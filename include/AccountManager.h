@@ -24,7 +24,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(grape), account,
 	(boost::uuids::uuid, id)
 	(boost::uuids::uuid, account_id)
-	(std::uint8_t, type)
+	(std::uint32_t, type)
 	(std::uint32_t, privilage)
 	(std::string, first_name)
 	(std::string, last_name)

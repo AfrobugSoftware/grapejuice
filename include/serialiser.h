@@ -320,19 +320,19 @@ namespace grape
 				if constexpr (grape::is_optional_field_set<arg_type>::value) {
 					//skip types with feild_set
 				}
-				/*else if constexpr (grape::is_optional_field<arg_type>::value) {
+				else if constexpr (grape::is_optional_field<arg_type>::value) {
 					using get_type = typename arg_type::value_type;
 					if (boost::variant2::holds_alternative<get_type>(row[constant::value])) {
 						boost::fusion::at<constant>(ret).value() =
 							std::move(boost::variant2::get<get_type>(row[constant::value]));
 					}
 				}
-				else {
+				else{
 					if (boost::variant2::holds_alternative<arg_type>(row[constant::value])) {
 						boost::fusion::at<constant>(ret) =
 							std::move(boost::variant2::get<arg_type>(row[constant::value]));
 					}
-				}*/
+				}
 			});
 			return ret;
 		}
