@@ -246,7 +246,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto d = fut.get();
 
 		//set session into active sessions
-		mActiveSessions.emplace(account.session_id, account);
+		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
 
 		grape::session_cred sc;
 		sc.session_start_time = account.session_start_time.value();
@@ -363,7 +363,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		//update cache
 		mActiveSessions.erase(cred.session_id);
-		mActiveSessions.emplace(account.session_id, account);
+		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
 
 		co_return app->OkResult("Account signed in from session");
 	}
@@ -446,18 +446,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid)
 {
 	try {
-		boost::optional<pof::base::data::row_t> user = boost::none;
+		boost::optional<grape::account> user = boost::none;
 		//this might block
 		bool found = mActiveSessions.visit(aid,
 			[&](const auto& v) {
 				user = v.second;
 			});
 		if (!found && !user.has_value()) return false;
-		auto& v = user->first;
-		auto& usid = boost::variant2::get<boost::uuids::uuid>(v[SESSION_ID]);
-		auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(v[SESSION_START_TIME]);
-		if (usid != sid) return false; //uid and sid mismatch
-		else if (ustime + mSessionDuration < pof::base::data::clock_t::now()) return false;
+		if (user.value().session_id != sid) return false; //uid and sid mismatch
+		else if (user.value().session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) return false;
 		else return true;
 	}
 	catch (std::exception& exp) {
@@ -520,19 +517,16 @@ boost::asio::awaitable<void>
 		if(!accountDetails || accountDetails->empty()) co_return;
 
 		for (auto& ac : *accountDetails) {
-			auto& v = ac.first;
-			auto& uid = boost::variant2::get<pof::base::data::duuid_t>(v[ACCOUNT_ID]);
-			auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(v[SESSION_START_TIME]);
-			if (ustime + mSessionDuration < pof::base::data::clock_t::now()) continue;
+			auto v = grape::serial::build<grape::account>(ac.first);
+			if (v.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) continue;
 
-			mActiveSessions.emplace(uid, ac);
+			mActiveSessions.emplace(std::make_pair(v.session_id.value(), v));
 		}
 	}
 	else {
 		//remove expired sessions
 		mActiveSessions.erase_if([&](const auto& ac) -> bool {
-			const auto& ustime = boost::variant2::get<pof::base::data::datetime_t>(ac.second.first[SESSION_START_TIME]);
-			return (ustime + mSessionDuration < pof::base::data::clock_t::now());
+			return (ac.second.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now());
 		});
 		//how to use mysql functions ? so that it can do the resetting on its own
 	}
@@ -552,12 +546,12 @@ bool grape::AccountManager::AuthuriseRequest(pof::base::net_manager::req_t& req)
 
 bool grape::AccountManager::IsUser(const boost::uuids::uuid& accountID, const boost::uuids::uuid& id)
 {
-	boost::optional<pof::base::data::row_t> user = boost::none;
+	boost::optional<grape::account> user = boost::none;
 	//this might block
 	bool found = mActiveSessions.visit(accountID,
 		[&](const auto& v) {
 			user = v.second;
 		});
 	if (!found && !user.has_value()) return false;
-	return (boost::variant2::get<boost::uuids::uuid>(user->first[0]) == id);
+	return (user->id == id);
 }

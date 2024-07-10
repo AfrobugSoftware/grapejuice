@@ -253,7 +253,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		branch.state = OPEN;
 		
 		//branch address
-		auto&& [address, buf2] = grape::serial::read<grape::address>(buf);
+		auto&& [address, buf3] = grape::serial::read<grape::address>(buf2);
 		address.id = uuidGen();
 		
 		//write the address

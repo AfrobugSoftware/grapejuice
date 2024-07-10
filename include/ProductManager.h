@@ -81,11 +81,32 @@ BOOST_FUSION_DEFINE_STRUCT(
 
 )
 
+//pharma products
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), pharma_product,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+	(pof::base::currency, unitprice)
+	(pof::base::currency, costprice)
+	(std::uint64_t, stock_count)
+	(std::uint64_t, min_stock_count)
+	(std::chrono::system_clock::time_point, date_added)
+	(std::chrono::system_clock::time_point, date_expired)
+	(std::uint64_t, category_id)
+)
+
+
 
 //collections
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape)(collection), products,
 	(std::vector<grape::product>, group)
+)
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape)(collection), pharma_products,
+	(std::vector<grape::pharma_product>, group)
 )
 
 

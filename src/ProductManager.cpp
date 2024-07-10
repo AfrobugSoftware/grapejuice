@@ -194,8 +194,8 @@ void grape::ProductManager::CreatePharmacyProductTable()
 				pharmacy_id binary(16),
 				branch_id binary(16),
 				product_id binary(16),
-				product_unitprice binary(17),
-				product_costprice binary(17),
+				unitprice binary(17),
+				costprice binary(17),
 				stock_count largeint,
 				min_stock_count largeint,
 				date_added datetime,
@@ -353,8 +353,7 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
 		query->m_arguments.resize(1);
-		constexpr static const std::array<std::string_view, PRODUCT_MAX> names = {
-			"serial_num",
+		constexpr static const std::array<std::string_view, 12> names = {
 			"name",
 			"generic_name",
 			"class",
@@ -370,12 +369,21 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 
 		std::ostringstream os;
 		os << "UPDATE products SET";
-		if (product_opt.name.has_value()) {
-			os << "name = ?";
-			query->m_arguments[0].push_back(boost::);
-
-		}
-		
+		using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::product_opt>::value>;
+		boost::fusion::for_each(range(), [&](auto i) {
+			using int_type = std::decay_t<decltype(i)>;
+			using type = std::decay_t<decltype(boost::fusion::at<int_type>(product_opt))>;
+			if constexpr (grape::is_optional_field<type>::value) {
+				auto& p = boost::fusion::at<int_type>(product_opt);
+				if (p.has_value()){
+					if constexpr (int_type::value != 1) {
+						os << ",";
+					}
+					os << fmt::format("{} = ?", names[int_type::value]);
+					query->m_arguments[0].push_back(boost::mysql::field(p.value()));
+				}
+			}
+		});
 		os << "WHERE id = ?;";
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(product_opt.id.begin(), product_opt.id.end())));
 
@@ -397,28 +405,9 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 		}
 
 		(void)fut.get();
-
-
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/json");
-		res.keep_alive(req.keep_alive());
-
-		js::json jobj = js::json::object();
-		jobj["result_status"] = "Successful"s;
-		jobj["result_message"] = "Product updated sucessfully"s;
-
-		auto sendData = jobj.dump();
-		boost::beast::http::dynamic_body::value_type value{};
-		auto buf_value = value.prepare(sendData.size());
-		boost::asio::buffer_copy(buf_value, boost::asio::buffer(sendData));
-		value.commit(sendData.size());
-
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
+		co_return app->OkResult("Product Updated");
 	}
-	catch (const js::json::exception& jerr) {
+	catch (const std::logic_error& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
@@ -430,18 +419,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 {
 	auto app = grape::GetApp();
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Cannot authorise account");
-		}
 		if (req.method() != http::verb::get) {
 			co_return app->mNetManager.bad_request("Get method expected");
 		}
-		auto& pid_bid = match["pid_bid"];
-		size_t pos = pid_bid.find_first_of("_");
-		if (pos == boost::core::string_view::npos) {
-			co_return app->mNetManager.bad_request("pid_bid in wrong format");
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
-		auto&& [pid, bid] = SplitPidBid(pid_bid);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT p.id,
@@ -465,8 +451,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
        WHERE pp.pharmacy_id = ? AND pp.branch_id = ? AND p.id = pp.product_id;)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_arguments = { {
-		boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())),
-		boost::mysql::field(boost::mysql::blob(bid.begin(), bid.end()))	
+		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))	
 		} };
 		query->m_waittime->expires_after(60s);
 		auto fut = query->get_future();
@@ -483,22 +469,40 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		}
 
 		auto data = fut.get();
-		auto pack = pof::base::packer{ *data }();
+		if (data->empty()) {
+			co_return app->mNetManager.not_found("No products for pharmacy");
+		}
+		using vector_type = boost::fusion::vector<boost::uuids::uuid, std::uint64_t,
+			std::string, std::string, std::string, std::string, std::string, std::string, std::string, pof::base::currency,
+			pof::base::currency, std::uint64_t, std::uint64_t, std::string, std::string, std::uint64_t, std::uint64_t>;
+		
+		boost::fusion::vector<std::vector<vector_type>> ret;
+		auto& group = boost::fusion::at_c<0>(ret);
+	
 
-		http::response<http::dynamic_body> res{ http::status::ok, 11 };
+		size_t size = 0, i = 0;
+		group.resize(data->size());
+
+		for (auto& d : *data) {
+			auto& vec = group[i];
+			grape::serial::compose(vec, d.first);
+			size += grape::serial::get_size(vec);
+			i++;
+		}
+
+		grape::response::body_type::value_type value(size, 0x00);
+		grape::serial::write(boost::asio::buffer(value), ret);
+
+		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
 		res.set(http::field::content_type, "application/octlet-stream");
 		res.keep_alive(req.keep_alive());
-
-		http::dynamic_body::value_type value;
-		auto out = value.prepare(pack.size());
-		boost::asio::buffer_copy(out, boost::asio::buffer(pack));
-		value.commit(pack.size());
-
 		res.body() = std::move(value);
 		res.prepare_payload();
 		co_return res;
-
+	}
+	catch (const std::logic_error& err) {
+		co_return app->mNetManager.bad_request(err.what());
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
@@ -511,9 +515,6 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Cannot authorise account");
-		}
 		if (req.method() != http::verb::delete_) {
 			co_return app->mNetManager.bad_request("Get method expected");
 		}
@@ -521,37 +522,25 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Body is required");
 		}
-		auto& pid_bid = match["pid_bid"];
-		size_t pos = pid_bid.find_first_of("_");
-		if (pos == boost::core::string_view::npos) {
-			co_return app->mNetManager.bad_request("pid_bid in wrong format");
-		}
-		auto&& [pid, bid] = SplitPidBid(pid_bid);
-		if (!app->mAccountManager.IsUser(
-			boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]), pid)) {
-			co_return app->mNetManager.bad_request("User does not belong to the requested pharmacy");
+		
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 		
 		//get product ID
-		size_t len = boost::lexical_cast<size_t>(req.at(boost::beast::http::field::content_length));
-		auto& req_body = req.body();
-		std::string data;
-		data.resize(len);
+		auto&& [product, buf2] = grape::serial::read<grape::pharma_product>(buf);
 
-		auto buffer = req_body.data();
-		boost::asio::buffer_copy(boost::asio::buffer(data), buffer);
-		req_body.consume(len);
-
-		js::json jsonData = js::json::parse(data);
-		boost::uuids::uuid prodid = boost::lexical_cast<boost::uuids::uuid>(static_cast<std::string>(jsonData["proudct_id"]));
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(CALL remove_pharma_product(?, ?, ?);)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_arguments = { {
-		boost::mysql::field(boost::mysql::blob(prodid.begin(), prodid.end())),
-		boost::mysql::field(boost::mysql::blob(bid.begin(), bid.end())),
-		boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end()))
+		boost::mysql::field(boost::mysql::blob(product.product_id.begin(), product.product_id.end())),
+		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
 		} };
 		query->m_waittime->expires_after(60s);
 		auto fut = query->get_future();
@@ -568,6 +557,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		(void)fut.get();
+
+		co_return app->OkResult("Remove product from pharmacy");
 	}
 	catch (const js::json::exception& jerr) {
 		co_return app->mNetManager.bad_request(jerr.what());
@@ -591,37 +582,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnA
 {
 	auto app = grape::GetApp();
 	try {
-		if (!app->mAccountManager.AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Cannot authorize user");
-		}
 		if (req.method() != http::verb::put) {
 			co_return app->mNetManager.bad_request("Put method expected");
 		}
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
-		}
-
-		auto prodbuf = req.body().data();
-		std::vector<char> buf(boost::asio::buffer_size(prodbuf));
-		boost::asio::buffer_copy(boost::asio::buffer(buf), prodbuf);
-		pof::base::data prodData;
-
-		//unpack the payload
-		pof::base::unpacker{ prodData }(buf);
-
-		if (prodData.empty()) {
-			co_return app->mNetManager.unprocessiable("Product payload is corrupt/not processiable"s);
-		}
-		
-		auto& pid_bid = match["pid_bid"];
-		size_t pos = pid_bid.find_first_of("_");
-		if (pos == boost::core::string_view::npos) {
-			co_return app->mNetManager.bad_request("pid_bid in wrong format");
-		}
-		auto&& [pid, bid] = SplitPidBid(pid_bid);
-		if (!app->mAccountManager.IsUser(
-			boost::lexical_cast<boost::uuids::uuid>(req["Account-ID"]), pid)) {
-			co_return app->mNetManager.bad_request("User does not belong to the requested pharmacy");
 		}
 
 

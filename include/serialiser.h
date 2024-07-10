@@ -82,7 +82,7 @@ namespace grape
 			void operator()(std::chrono::system_clock::time_point& tp) const {
 				tp = std::chrono::system_clock::time_point{
 					std::chrono::system_clock::duration{
-							bswap(*boost::asio::buffer_cast<std::chrono::system_clock::rep*>(buf_))}
+							bswap(*boost::asio::buffer_cast<const std::chrono::system_clock::rep*>(buf_))}
 					};
 				buf_ += sizeof(std::chrono::system_clock::rep);
 			}
@@ -132,7 +132,7 @@ namespace grape
 				if ((*opt_)[N]) {
 					T v{};
 					(*this)(v);
-					val = v;
+					val.emplace(v);
 				}
 			}
 
@@ -211,17 +211,19 @@ namespace grape
 			}
 			template<typename T, size_t N>
 				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
-			|| std::is_same_v<T, std::string> || std::is_array_v<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
 			void operator()(const optional_field<T, N>& field) const {
 				if (optv_ == nullptr) throw std::logic_error("optional field comes before optional set");
-				opt_.set(N);
-				*optv_ = static_cast<opt_fields::value_type>(opt_.to_ulong());
-				(*this)(*field);
+				if (field.has_value()) {
+					opt_.set(N);
+					*optv_ = static_cast<opt_fields::value_type>(opt_.to_ulong());
+					(*this)(*field);
+				}
 			}
 			template<typename T>
 				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
-			|| std::is_same_v<T, std::string> || std::is_array_v<T>
-			void operator()(std::vector<T>&vec) const
+			|| std::is_same_v<T, std::string> || std::is_array_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
+			void operator()(const std::vector<T>&vec) const
 			{
 				(*this)(vec.size());
 				for (const auto& v : vec) {
@@ -239,6 +241,10 @@ namespace grape
 			template<Integers T>
 			void operator()(const T& i) const {
 				size += sizeof(T);
+			}
+
+			void operator()(const std::chrono::system_clock::time_point& tp) const {
+				size += sizeof(std::chrono::system_clock::rep);
 			}
 
 			void operator()(const boost::uuids::uuid& uuid)  const {
@@ -270,24 +276,23 @@ namespace grape
 
 			template<typename T, size_t N>
 			void operator()(const opt_fields& t) const {
-				opt_= opt_fields::bits_type(t);
+				opt_.reset();
 				size += sizeof(opt_fields::value_type);
 			}
 
 			template<typename T, size_t N>
 				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
-			|| std::is_same_v<T, std::string> || std::is_array_v<T>
+			|| std::is_same_v<T, std::string> || std::is_array_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
 				void operator()(const optional_field<T, N>&field) const {
-				if (!opt_.has_value()) throw std::logic_error("optional field comes before optional set");;
-				if ((*opt_)[N]) {
-					(*this)(*field);
+				if (field.has_value()) {
+					(*this)(field.value());
 				}
 			}
 
 			template<typename T>
 				requires Integers<T> || FusionStruct<T> || Enums<T> || Pods<T>
-			|| std::is_same_v<T, std::string> || std::is_array_v<T>
-				void operator()(std::vector<T>&vec) const
+			|| std::is_same_v<T, std::string> || std::is_array_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
+				void operator()(const std::vector<T>&vec) const
 			{
 				using type = std::decay_t<T>;
 				if constexpr (std::disjunction_v<std::is_same<type, std::string>,
@@ -298,7 +303,7 @@ namespace grape
 				}
 				else if constexpr (std::disjunction_v<std::is_integral<T>, std::is_floating_point<T>,
 				 std::is_enum<T>, std::is_pod<T>, std::is_array<T>>) {
-					size += vec.size() * sizeof(T)
+					size += vec.size() * sizeof(T);
 				}
 			}
 		};
@@ -306,16 +311,16 @@ namespace grape
 	
 		template<typename T>
 			requires FusionStruct<T>
-		auto build(const pof::base::data::row_t::first_type& row) -> T&& {
+		auto build(const pof::base::data::row_t::first_type& row) -> T {
 			typedef boost::mpl::range_c<unsigned, 0, boost::mpl::size<T>::value> range;
 			T ret{};
 			boost::fusion::for_each(range(), [&](auto i) {
 				using constant = std::decay_t<decltype(i)>;
 				using arg_type = std::decay_t<decltype(boost::fusion::at<constant>(ret))>;
-				if constexpr (std::is_optional_field_set<arg_type>::value) {
+				if constexpr (grape::is_optional_field_set<arg_type>::value) {
 					//skip types with feild_set
 				}
-				else if constexpr (std::is_optional_field<arg_type>::value) {
+				/*else if constexpr (grape::is_optional_field<arg_type>::value) {
 					using get_type = typename arg_type::value_type;
 					if (boost::variant2::holds_alternative<get_type>(row[constant::value])) {
 						boost::fusion::at<constant>(ret).value() =
@@ -327,11 +332,25 @@ namespace grape
 						boost::fusion::at<constant>(ret) =
 							std::move(boost::variant2::get<arg_type>(row[constant::value]));
 					}
-				}
+				}*/
 			});
 			return ret;
 		}
-		
+			
+		template<typename... Args>
+		void compose(boost::fusion::vector<Args...>& vec, const pof::base::data::row_t::first_type& row)
+		{
+			using vector_type = boost::fusion::vector<Args...>;
+			typedef boost::mpl::range_c<unsigned, 0, boost::mpl::size<vector_type>::value> range;
+
+			boost::fusion::for_each(range(), [&](auto i) {
+				using constant = std::decay_t<decltype(i)>;
+				using arg_type = std::decay_t<decltype(boost::fusion::at<constant>(vec))>;
+				boost::fusion::at<constant>(vec) = 
+					std::move(boost::variant2::get<arg_type>(row[constant::value]));
+			});
+		}
+
 
 		template<FusionStruct T>
 		std::pair<T, boost::asio::const_buffer> read(boost::asio::const_buffer b) {
