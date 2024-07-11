@@ -89,6 +89,30 @@ int main(int argc, char** argv)
            co_return res;
     });
 
+    grape::credentials cred;
+    cred.account_id = boost::uuids::random_generator_mt19937{}();
+    cred.branch_id = boost::uuids::random_generator_mt19937{}();
+    cred.pharm_id = boost::uuids::random_generator_mt19937{}();
+    cred.session_id = boost::uuids::random_generator_mt19937{}();
+
+    const size_t size = grape::serial::get_size(cred);
+
+    grape::response::body_type::value_type value(size, 0x00);
+
+    grape::serial::write(boost::asio::buffer(value), cred);
+
+    std::cout << boost::lexical_cast<std::string>(cred.account_id) << std::endl;
+
+    for (auto c : value) {
+        std::cout << std::hex << c;
+    }
+    std::cout << std::endl;
+
+    auto&& [cred2, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(value));
+
+    std::cout << boost::lexical_cast<std::string>(cred2.account_id) << std::endl;
+
+
     app->Run();
     int a;
     std::cin >> a;

@@ -324,6 +324,7 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 			});
 		return;
 	}
+	stream_.expires_after(std::chrono::seconds(60));
 
 	boost::urls::matches m;
 	auto found = manager.m_router.find(rpath.value(), m);

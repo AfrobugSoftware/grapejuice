@@ -473,7 +473,7 @@ boost::asio::awaitable<bool>
 		)");
 		query->m_arguments = { {boost::mysql::field(username)} };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(60));
+		query->m_waittime->expires_after(std::chrono::seconds(5));
 
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -504,7 +504,7 @@ boost::asio::awaitable<void>
 		auto nullid = boost::uuids::nil_uuid();
 		query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))}};
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(60));
+		query->m_waittime->expires_after(std::chrono::seconds(5));
 
 		auto fut = query->get_future();
 		app->mDatabase->push(query);

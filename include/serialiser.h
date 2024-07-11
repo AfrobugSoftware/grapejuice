@@ -48,6 +48,7 @@ namespace grape
 	struct optional_field : std::optional<T> {
 		constexpr static const size_t bit = N;
 		using value_type = T;
+		using std::optional<T>::operator=;
 	};
 
 	using opt_fields = optional_field_set<std::uint16_t>;
@@ -120,7 +121,7 @@ namespace grape
 				boost::fusion::for_each(val, *this);
 			}
 			template<typename T, size_t N>
-			void operator()(opt_fields) const {
+			void operator()(optional_field_set<T,N>& f) const {
 				opt_fields::value_type val;
 				(*this)(val);
 				opt_ = opt_fields::bits_type(val);
@@ -132,7 +133,7 @@ namespace grape
 				if ((*opt_)[N]) {
 					T v{};
 					(*this)(v);
-					val.emplace(v);
+					val = v;
 				}
 			}
 
@@ -204,7 +205,7 @@ namespace grape
 			}
 
 			template<typename T, size_t N>
-			void operator()(const opt_fields& t) const {
+			void operator()(const optional_field_set<T, N>& t) const {
 				opt_.reset();
 				optv_ = boost::asio::buffer_cast<opt_fields::value_type*>(buf_);
 				buf_ += sizeof(opt_fields::value_type);
@@ -252,8 +253,8 @@ namespace grape
 			}
 
 			void operator()(const std::string& str) const {
-				(*this)(static_cast<std::uint32_t>(str.size()));
-				size+= str.size();
+				size += sizeof(std::uint32_t);
+				size += str.size();
 			}
 
 			void operator()(const pof::base::currency& cur) const {
@@ -275,7 +276,7 @@ namespace grape
 			}
 
 			template<typename T, size_t N>
-			void operator()(const opt_fields& t) const {
+			void operator()(const optional_field_set<T,N>& t) const {
 				opt_.reset();
 				size += sizeof(opt_fields::value_type);
 			}
@@ -295,6 +296,8 @@ namespace grape
 				void operator()(const std::vector<T>&vec) const
 			{
 				using type = std::decay_t<T>;
+				//the space for the size of the vector
+				size += sizeof(std::uint32_t);
 				if constexpr (std::disjunction_v<std::is_same<type, std::string>,
 				  boost::mpl::is_sequence<T>>) {
 					for (auto& v : vec) {
@@ -356,14 +359,18 @@ namespace grape
 		std::pair<T, boost::asio::const_buffer> read(boost::asio::const_buffer b) {
 			reader r(std::move(b));
 			T res{};
-			boost::fusion::for_each(res, r);
+			boost::fusion::for_each(res, [&](auto& i) {
+				r(i);
+			});
 			return std::make_pair(res, r.buf_);
 		}
 
 		template<FusionStruct T>
 		boost::asio::mutable_buffer write(boost::asio::mutable_buffer buf, const T& val) {
 			writer w(std::move(buf));
-			boost::fusion::for_each(val, w);
+			boost::fusion::for_each(val, [&](const auto& i) {
+				w(i);
+			});
 			return w.buf_;
 		}
 
@@ -371,7 +378,9 @@ namespace grape
 			requires FusionStruct<T>
 		size_t get_size(const T& val) {
 			sizer s{};
-			boost::fusion::for_each(val, s);
+			boost::fusion::for_each(val, [&](const auto& i) {
+				s(i);
+			});
 			return s.size;
 		}
 	}
