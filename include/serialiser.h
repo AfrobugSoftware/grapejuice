@@ -83,8 +83,7 @@ namespace grape
 			void operator()(std::chrono::system_clock::time_point& tp) const {
 				tp = std::chrono::system_clock::time_point{
 					std::chrono::system_clock::duration{
-							bswap(*boost::asio::buffer_cast<const std::chrono::system_clock::rep*>(buf_))}
-					};
+					bswap(*boost::asio::buffer_cast<const std::chrono::system_clock::rep*>(buf_))}};
 				buf_ += sizeof(std::chrono::system_clock::rep);
 			}
 
@@ -217,7 +216,7 @@ namespace grape
 				if (optv_ == nullptr) throw std::logic_error("optional field comes before optional set");
 				if (field.has_value()) {
 					opt_.set(N);
-					*optv_ = static_cast<opt_fields::value_type>(opt_.to_ulong());
+					*optv_ = bswap(static_cast<opt_fields::value_type>(opt_.to_ulong()));
 					(*this)(*field);
 				}
 			}

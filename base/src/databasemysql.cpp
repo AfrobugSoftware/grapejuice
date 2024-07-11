@@ -12,8 +12,8 @@ boost::mysql::blob pof::base::to_mysql_uuid(const pof::base::data::duuid_t& duui
 }
 
 
-pof::base::databasemysql::databasemysql(boost::asio::io_context& ios, boost::asio::ssl::context& ssl)
-	: m_resolver(boost::asio::make_strand(ios.get_executor())),  mIos(ios), mSsl(ssl){
+pof::base::databasemysql::databasemysql(boost::asio::io_context& ios)
+	: m_resolver(boost::asio::make_strand(ios.get_executor())), mIos(ios), mSsl{boost::asio::ssl::context_base::sslv23_client} {
 }
 
 bool pof::base::databasemysql::create_pool()
@@ -55,6 +55,7 @@ bool pof::base::databasemysql::connect()
 	m_isconnected = false;
 	auto iter = std::remove_if(m_pool.begin(), m_pool.end(), [&](auto& conn) {
 		conn->connect(*results.begin(), params, ec, d);
+		spdlog::info(ec.message());
 		return static_cast<bool>(ec);
 	});
 	m_pool.erase(iter, m_pool.end());
@@ -72,6 +73,8 @@ bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemys
 			boost::asio::co_spawn(sp->get_executor(), runquery(query), boost::asio::detached);
 		} else {
 			//no connection
+			//caancel the timer
+			if (query->m_waittime.has_value()) query->m_waittime->cancel();
 			spdlog::error("No connection avaliable");
 			return false;
 		}
@@ -212,9 +215,9 @@ void pof::base::databasemysql::create_database(const std::string& name)
 		auto query = std::make_shared<pof::base::query<pof::base::databasemysql>>(shared_from_this());
 		query->m_sql = fmt::format("CREATE DATABASE IF NOT EXISTS {};", name);
 		auto fut = query->get_future();
-		push(query);
+		bool pushed = push(query);
 
-		(void)fut.get();
+		if(pushed) (void)fut.get();
 	}
 	catch (const std::exception& exp) {
 		spdlog::error("Failed to create database");

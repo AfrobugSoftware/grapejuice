@@ -4,7 +4,7 @@ static std::shared_ptr<grape::Application> app;
 
 grape::Application::Application(const std::string& servername)
 : mServerName(servername){
-	mDatabase = std::make_shared<pof::base::databasemysql>(mNetManager.io(), mNetManager.ssl());
+	mDatabase = std::make_shared<pof::base::databasemysql>(mNetManager.io());
 }
 
 grape::Application::~Application()
@@ -67,9 +67,7 @@ void grape::Application::CreateRoutes()
 void grape::Application::CreateTable()
 {
 	mAccountManager.CreateAccountTable();
-	mPharmacyManager.CreatePharmacyTable();
-	mPharmacyManager.CreateBranchTable();
-	mPharmacyManager.CreateAddressTable();
+	mPharmacyManager.CreateTables();
 	mProductManager.CreateTables();
 	mProductManager.Procedures();
 }

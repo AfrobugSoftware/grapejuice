@@ -50,7 +50,7 @@ namespace pof {
 			using connection_t = boost::mysql::tcp_ssl_connection;
 			using conn_ptr = std::shared_ptr<connection_t>;
 
-			databasemysql(boost::asio::io_context& ios, boost::asio::ssl::context& ssl);
+			databasemysql(boost::asio::io_context& ios);
 			bool create_pool();
 
 			boost::asio::awaitable<std::error_code> connect(conn_ptr conn, std::string hostname, 
@@ -87,7 +87,7 @@ namespace pof {
 
 			//ref to the operating system fasilities
 			boost::asio::io_context& mIos;
-			boost::asio::ssl::context& mSsl;
+			boost::asio::ssl::context mSsl;
 
 			boost::asio::ip::tcp::resolver m_resolver;
 

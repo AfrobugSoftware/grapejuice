@@ -17,6 +17,8 @@ void grape::ProductManager::CreateTables()
 	CreateSupplierTable();
 	CreateCategoryTable();
 	CreateInvoiceTable();
+	CreatePharmacyProductTable();
+	CreateExpiredTable();
 }
 
 void grape::ProductManager::CreateProductTable()
@@ -39,7 +41,7 @@ void grape::ProductManager::CreateProductTable()
 				package_size integer,
 				sideeffects text,
 				barcode text,
-				manufactures_name text,
+				manufactures_name text
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -125,10 +127,10 @@ void grape::ProductManager::CreateCategoryTable()
 	try {
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
-			R"(CREATE TABLE IF NOT EXSITS categories (
+			R"(CREATE TABLE IF NOT EXISTS categories (
 				pharmacy_id binary(16),
 				branch_id binary(16),
-				category_id integer autoincrement,
+				category_id integer,
 				name text
 			);)");
 		auto fut = query->get_future();
@@ -146,7 +148,7 @@ void grape::ProductManager::CreateInvoiceTable()
 	try {
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
-			R"(CREATE TABLE IF NOT EXSITS invoices (
+			R"(CREATE TABLE IF NOT EXISTS invoices (
 				pharmacy_id binary(16),
 				branch_id binary(16),
 				supplier_id binary(16),
@@ -173,8 +175,8 @@ void grape::ProductManager::CreateExpiredTable()
 				pharmacy_id binary(16),
 				branch_id binary(16),
 				product_id binary(16),
-				date datetime,
-				stock_count integer,
+				date_expired datetime,
+				stock_count integer
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -196,11 +198,11 @@ void grape::ProductManager::CreatePharmacyProductTable()
 				product_id binary(16),
 				unitprice binary(17),
 				costprice binary(17),
-				stock_count largeint,
-				min_stock_count largeint,
+				stock_count integer,
+				min_stock_count integer,
 				date_added datetime,
 				date_expire datetime,
-				category_id integer,
+				category_id integer
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -611,18 +613,16 @@ void grape::ProductManager::RemovePharamProducts()
 	auto app = grape::GetApp();
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
-			R"(CREATE PROCEDURE IF NOT EXISTS remove_pharma_product (IN pid CHAR(16), 
-               IN bid CHAR(16), IN prodid CHAR(16) 
+			R"(CREATE PROCEDURE IF NOT EXISTS remove_pharma_product (IN pid BINARY(16), IN bid BINARY(16), IN prodid BINARY(16) )
                BEGIN 
-                   START TRANSACTION
-						DELETE FROM pharma_products WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM expired WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM invoices WHERE WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM packs WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM orders WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM categories WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-						DELETE FROM inventory WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid
-					COMMIT
+                   START TRANSACTION;
+						DELETE FROM pharma_products WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+						DELETE FROM expired WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+						DELETE FROM invoices WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+						DELETE FROM packs WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+						DELETE FROM orders WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+						DELETE FROM inventory WHERE product_id = prodid AND branch_id = bid AND pharmacy_id = pid;
+					COMMIT;
 			   END;)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);

@@ -14,6 +14,7 @@ void grape::PharmacyManager::CreateTables()
 	CreatePharmacyTable();
 	CreateBranchTable();
 	CreateAddressTable();
+	CreateInstitution();
 }
 
 void grape::PharmacyManager::CreatePharmacyTable()
@@ -66,7 +67,7 @@ void grape::PharmacyManager::CreateBranchTable()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(
-			CREATE TABLE IF NOT EXSITS branches (
+			CREATE TABLE IF NOT EXISTS branches (
 			branch_id binary(16),
 			pharmacy_id binary(16),
 			address_id binary(16),
@@ -80,6 +81,7 @@ void grape::PharmacyManager::CreateBranchTable()
 	}
 	catch (boost::mysql::error_with_diagnostics& err) {
 		//need to log this 
+		spdlog::error(err.what());
 	}
 }
 
@@ -102,6 +104,7 @@ void grape::PharmacyManager::CreateAddressTable()
 	}
 	catch (boost::mysql::error_with_diagnostics& err) {
 		//need to log this
+		spdlog::error(err.what());
 	}
 }
 

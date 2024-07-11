@@ -159,10 +159,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		//send response
 		co_return app->OkResult("Account Signed up");
 	}
-	catch (const js::json::exception& err) {
+	catch (const std::logic_error& err) {
+		spdlog::error(err.what());
 		co_return app->mNetManager.bad_request(err.what());
 	}
 	catch (std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -197,10 +199,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				  account_cred.pharmacy_id.end()))}};
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
-
-
 		auto fut = query->get_future();
-		app->mDatabase->push(query);
+		bool tried = app->mDatabase->push(query);
+
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
 
 		auto&& [ec] = co_await query->m_waittime->async_wait();
 		if (ec != boost::asio::error::operation_aborted) {
@@ -222,25 +229,31 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		//start a session for the user
-		auto sessionquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
+		query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
 			UPDATE accounts SET session_id = ?, session_start = ? WHERE account_username = ? AND account_id = ?;
 		)"s);
 
 		account.session_id.value() = boost::uuids::random_generator_mt19937{}();
 		auto tt = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(pof::base::data::clock_t::now());
-		sessionquery->m_arguments = { {
+		query->m_arguments = { {
 					boost::mysql::field(boost::mysql::blob(account.session_id.value().begin(), account.session_id.value().end())),
 					boost::mysql::field(boost::mysql::datetime(tt)),
 					boost::mysql::field(account.username),
 					boost::mysql::field(boost::mysql::blob(account.account_id.begin(), account.account_id.end()))
 		} };
-		sessionquery->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		sessionquery->m_waittime->expires_after(std::chrono::seconds(60));
-		fut = std::move(sessionquery->get_future());
-		app->mDatabase->push(sessionquery);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+		fut = std::move(query->get_future());
+		app->mDatabase->push(query);
 
-		auto&& [ec2] = co_await query->m_waittime->async_wait();
-		if (ec2 != boost::asio::error::operation_aborted) {
+		tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		std::tie(ec) = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
 			co_return app->mNetManager.timeout_error();
 		}
 		auto d = fut.get();
@@ -291,7 +304,13 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		auto fut = query->get_future();
-		app->mDatabase->push(query);
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
 		auto&& [ec] = co_await query->m_waittime->async_wait();
 		if (ec != boost::asio::error::operation_aborted) {
 			co_return app->mNetManager.timeout_error();
@@ -353,7 +372,13 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		auto fut = query->get_future();
-		app->mDatabase->push(query);
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
 		auto&& [ec] = co_await query->m_waittime->async_wait();
 		if (ec != boost::asio::error::operation_aborted) {
 			co_return app->mNetManager.timeout_error();
@@ -473,13 +498,13 @@ boost::asio::awaitable<bool>
 		)");
 		query->m_arguments = { {boost::mysql::field(username)} };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(5));
+		query->m_waittime->expires_after(std::chrono::seconds(1));
 
 		auto fut = query->get_future();
-		app->mDatabase->push(query);
+		bool pushed = app->mDatabase->push(query);
 
 		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
+		if (ec != boost::asio::error::operation_aborted || pushed == false) {
 			throw std::system_error(std::make_error_code(std::errc::timed_out));
 		}
 
@@ -496,39 +521,44 @@ boost::asio::awaitable<void>
 	grape::AccountManager::UpdateSessions()
 {
 	auto app = grape::GetApp();
-	if (mActiveSessions.empty()){
-		//the server is starting up, check dataabase for active sessions
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
+	try {
+		if (mActiveSessions.empty()) {
+			//the server is starting up, check dataabase for active sessions
+			auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
 			SELECT * FROM accounts WHERE session_id IS NOT ?;
 		)");
-		auto nullid = boost::uuids::nil_uuid();
-		query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))}};
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(5));
+			auto nullid = boost::uuids::nil_uuid();
+			query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))} };
+			query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+			query->m_waittime->expires_after(std::chrono::seconds(1));
 
-		auto fut = query->get_future();
-		app->mDatabase->push(query);
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			throw std::system_error(std::make_error_code(std::errc::timed_out));
+			auto fut = query->get_future();
+			bool pushed = app->mDatabase->push(query);
+			auto&& [ec] = co_await query->m_waittime->async_wait();
+			if (ec != boost::asio::error::operation_aborted || pushed == false) {
+				throw std::system_error(std::make_error_code(std::errc::timed_out));
+			}
+
+			auto accountDetails = fut.get();
+			if (!accountDetails || accountDetails->empty()) co_return;
+
+			for (auto& ac : *accountDetails) {
+				auto v = grape::serial::build<grape::account>(ac.first);
+				if (v.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) continue;
+
+				mActiveSessions.emplace(std::make_pair(v.session_id.value(), v));
+			}
 		}
-
-		auto accountDetails = fut.get();
-		if(!accountDetails || accountDetails->empty()) co_return;
-
-		for (auto& ac : *accountDetails) {
-			auto v = grape::serial::build<grape::account>(ac.first);
-			if (v.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) continue;
-
-			mActiveSessions.emplace(std::make_pair(v.session_id.value(), v));
+		else {
+			//remove expired sessions
+			mActiveSessions.erase_if([&](const auto& ac) -> bool {
+				return (ac.second.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now());
+				});
+			//how to use mysql functions ? so that it can do the resetting on its own
 		}
 	}
-	else {
-		//remove expired sessions
-		mActiveSessions.erase_if([&](const auto& ac) -> bool {
-			return (ac.second.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now());
-		});
-		//how to use mysql functions ? so that it can do the resetting on its own
+	catch (const std::exception& exp) {
+		//spdlog::error(exp.what());
 	}
 }
 
