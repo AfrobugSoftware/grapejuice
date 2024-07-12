@@ -41,18 +41,6 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, info)
 )
 
-//address
-BOOST_FUSION_DEFINE_STRUCT(
-	(grape), address,
-	(boost::uuids::uuid, id)
-	(std::string, country)
-	(std::string, state)
-	(std::string, lga)
-	(std::string, street)
-	(std::string, num)
-	(std::string, add_info)
-)
-
 //branch collection
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape)(collection),

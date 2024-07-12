@@ -132,7 +132,7 @@ namespace grape {
 			boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> onAppUpdate(pof::base::net_manager::req_t&& req,
 			boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> onGetApp(pof::base::net_manager::req_t&& req,
+		boost::asio::awaitable<pof::base::net_manager::res_t> onGetOffice(pof::base::net_manager::req_t&& req,
 			boost::urls::matches&& match);
 
 

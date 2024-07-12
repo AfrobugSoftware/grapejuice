@@ -315,7 +315,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onAppU
 			*boost::asio::buffer_cast<std::uint32_t*>(mbuf) = name.size();
 			mbuf += sizeof(std::uint32_t);
 
-			std::copy(name.begin(), name.end(), mbuf.data());
+			std::copy(name.begin(), name.end(), reinterpret_cast<char*>(mbuf.data()));
 			mbuf += name.size();
 
 			*boost::asio::buffer_cast<std::uint32_t*>(mbuf) = size;
@@ -385,7 +385,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onGetO
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
 		res.set(http::field::content_type, "application/x-msdownload");
-		res.set("Content-Disposition", boost::beast::string_view(fmt::format("attachment; filename={}", name)));
+		res.set("Content-Disposition", boost::beast::string_view(fmt::format("attachment; filename=\"{}\"", name)));
 		res.keep_alive(req.keep_alive());
 
 		res.body() = std::move(value);
