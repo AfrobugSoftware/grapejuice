@@ -13,9 +13,8 @@ namespace fs = std::filesystem;
 int main(int argc, char** argv)
 {
     std::cout << "grapejuice 1.0.0" << std::endl;
- 
     auto app = grape::GetApp();
-    app->Init();
+    app->Init(argc, argv);
 
     app->route("/", [](pof::base::net_manager::req_t&& req, 
         boost::urls::matches&& m) -> boost::asio::awaitable<pof::base::net_manager::res_t> {

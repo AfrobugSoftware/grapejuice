@@ -14,7 +14,7 @@ void grape::AccountManager::CreateAccountTable()
 {
 	auto app = grape::GetApp();
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase);
-	query->m_sql = R"(CREATE TABLE IF NOT EXISTS account (
+	query->m_sql = R"(CREATE TABLE IF NOT EXISTS accounts (
 		id binary(16),
 		account_id binary(16),
 		account_type tinyint,
@@ -94,7 +94,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			 R"(INSERT INTO account VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
+			 R"(INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		std::vector<boost::mysql::field> args;
 		account.id = boost::uuids::random_generator_mt19937{}();
 		const auto niluuid = boost::uuids::nil_uuid();
@@ -187,10 +187,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		std::string sql;
 		if (grape::VerifyEmail(account_cred.username)) {
-			sql = R"(SELECT * FROM accounts WHERE email = ? AND pharmacy_id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE email = ? AND id = ?;)"s;
 		}
 		else {
-			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND id = ?;)"s;
 		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, std::move(sql));

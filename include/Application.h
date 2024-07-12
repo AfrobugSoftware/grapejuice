@@ -5,9 +5,11 @@
 #include <filesystem>
 #include <boost/signals2/signal.hpp>
 #include <boost/fusion/include/define_struct.hpp>
+#include <boost/program_options.hpp>
+#include <filesystem>
 
 #include <regex>
-
+#include <fstream>
 
 #include "netmanager.h"
 #include "databasemysql.h"
@@ -36,7 +38,42 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, branch_id)
 )
 
+//app details
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), app_details,
+	(boost::uuids::uuid, app_id)
+	(boost::uuids::uuid, app_install_location_id)
+	(std::string, app_name)
+	(std::string, app_version)
+	(std::string, os)
+	(std::string, locale)
+	(std::chrono::system_clock::time_point, app_installed_date)
+	(std::chrono::system_clock::time_point, app_last_update)
+	(std::chrono::system_clock::time_point, app_last_ping)
+)
 
+//file buffer
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), file, 
+	(std::string, name)
+	(std::vector<std::uint8_t>, content)
+)
+
+//address
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), address,
+	(boost::uuids::uuid, id)
+	(std::string, country)
+	(std::string, state)
+	(std::string, lga)
+	(std::string, street)
+	(std::string, num)
+	(std::string, add_info)
+)
+
+
+namespace po = boost::program_options;
+namespace fs = std::filesystem;
 namespace grape {
 	using request = pof::base::net_manager::req_t;
 	using response = pof::base::net_manager::res_t;
@@ -55,12 +92,13 @@ namespace grape {
 		Application(const std::string& servername);
 		virtual ~Application();
 
-		virtual bool Init();
+		virtual bool Init(int argc, char** argv);
 		virtual bool Run();
 		virtual bool Exit();
 
 		void CreateRoutes();
 		void CreateTable();
+		void CreateAppDetailsTable();
 		void route(const std::string& target,
 			pof::base::net_manager::callback&& endpoint);
 
@@ -85,6 +123,18 @@ namespace grape {
 			res.prepare_payload();
 			return res;
 		}
+
+		//application specific routes
+		void SetRoutes();
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppPing(pof::base::net_manager::req_t&& req,
+			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppCheckUpdate(pof::base::net_manager::req_t&& req,
+			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppUpdate(pof::base::net_manager::req_t&& req,
+			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onGetApp(pof::base::net_manager::req_t&& req,
+			boost::urls::matches&& match);
+
 
 		std::string mServerName; 
 		std::shared_ptr<pof::base::databasemysql> mDatabase;

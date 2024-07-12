@@ -80,6 +80,11 @@ namespace grape
 				buf_ += sizeof(T);
 			}
 
+			template<Enums E>
+			void operator()(E& e) const {
+				
+			}
+
 			void operator()(std::chrono::system_clock::time_point& tp) const {
 				tp = std::chrono::system_clock::time_point{
 					std::chrono::system_clock::duration{
@@ -143,10 +148,16 @@ namespace grape
 				std::uint32_t len = 0;
 				(*this)(len);
 				vec.reserve(len);
-				for (; len; --len) {
-					T v{};
-					(*this)(v);
-					vec.emplace_back(std::move(v));
+				if constexpr (std::is_integral_v<T>) {
+					std::copy(reinterpret_cast<T*>(buf_.data()),
+						reinterpret_cast<T*>(buf_.data()) + len, vec.begin());
+				}
+				else {
+					for (; len; --len) {
+						T v{};
+						(*this)(v);
+						vec.emplace_back(std::move(v));
+					}
 				}
 			}
 		};
@@ -225,9 +236,18 @@ namespace grape
 			|| std::is_same_v<T, std::string> || std::is_array_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
 			void operator()(const std::vector<T>&vec) const
 			{
-				(*this)(vec.size());
-				for (const auto& v : vec) {
-					(*this)(v);
+				if constexpr (std::is_integral_v<T>) {
+					if (vec.size() > buf_.size()) throw std::logic_error("Cannot fit content in buffer");
+					(*this)(vec.size());
+
+					std::copy(vec.begin(), vec.end(), reinterpret_cast<T*>(buf_.data()));
+					buf_ += vec.size();
+				}
+				else {
+					(*this)(vec.size());
+					for (const auto& v : vec) {
+						(*this)(v);
+					}
 				}
 			}
 		

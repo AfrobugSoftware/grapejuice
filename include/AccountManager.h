@@ -72,27 +72,6 @@ namespace grape
 			ACCOUNT_INSTITUTION = 0x02,
 		};
 
-		enum : std::uint8_t {
-			ID = 0, //may be a pharmacy or an institution
-			ACCOUNT_ID,
-			ACCOUNT_TYPE,
-			PRIVILAGE,
-			FIRST_NAME,
-			LAST_NAME,
-			DOB,
-			PHONENUMBER,
-			EMAIL,
-			USERNAME,
-			PASSHASH,
-			SEC_QUE,
-			SEC_ANSHASH,
-			SIGNIN_TIME,
-			SIGNOUT_TIME,
-			SESSION_ID,
-			SESSION_START_TIME,
-
-			ACCOUNT_COL_COUNT,
-		};
 		AccountManager();
 		~AccountManager();
 
