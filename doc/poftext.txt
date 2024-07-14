@@ -1,0 +1,24 @@
+The state of the prescription should be inside the prescription itself.
+
+This is a full prescription
+it contains
+0, prescription uuid
+1, Issuing institution name
+2, Prescriber name.
+3, Prescriber profession,
+4, prescriber registration no,
+5, patient information -> {first name, last name, NIN, date of birth, address}
+6, insurance identification, => ??
+7, Dispenser list -> {dispenser name, pharmacy name, registration_number, date_dispensed, dispenser signature, item list index table},
+8, time to live -> {based on the product class of the products in the item list, if no controlled medication, it is usually 6months before expiration of prescription  }
+9, issuing date,
+10, issuer signature,
+11, item list message authentication code
+12, pharmaoffice verification signature,
+13, item list -> {product_class, product_name, product_formulation, product_strength, product_dose, product_cost,product_warning}
+14, repeat state
+15, prescription state -> RAISE, PARITAL DISPENSE, COMPLETE DISPENSE, PENDING, REJECTED
+18, prescription cost -> {total, break_down_list -> {dispenser_id, total cost}}
+19, prescription fee usually 0.05% of the prescription cost but can be set by the issuer optional.
+20, pharmaoffice service fee prescription 50kobo or N0.5
+21, formulary to use ? optional.

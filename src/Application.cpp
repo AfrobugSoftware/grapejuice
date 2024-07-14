@@ -366,11 +366,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onGetO
 		js::json appObj = js::json::parse(os.str());
 
 		auto pofile = fs::current_path() / "distro" / static_cast<std::string>(appObj["app_name"]);
-		std::string name = pofile.filename().string();
 		if (!fs::exists(pofile)) {
 			co_return OkResult("No app to update");
 		}
-		file.open(pofile, std::ios::in);
+		file.open(pofile, std::ios::in | std::ios::binary);
 		if (!file.is_open()) {
 			co_return mNetManager.server_error("Error in processing update file");
 		}
@@ -380,13 +379,16 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onGetO
 		grape::response::body_type::value_type value(size, 0x00);
 
 		file.read(reinterpret_cast<char*>(value.data()), size);
+		if (!file) {
+			co_return mNetManager.server_error(fmt::format("File not read properly, read {:d} bytes", file.gcount()));
+		}
 		file.close();
 
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
 		res.set(http::field::content_type, "application/x-msdownload");
-		res.set("Content-Disposition", boost::beast::string_view(fmt::format("attachment; filename=\"{}\"", name)));
-		res.keep_alive(req.keep_alive());
+		res.set("Content-Disposition", boost::beast::string_view(fmt::format("attachment;filename=\"{}\"", pofile.filename().string())));
+		res.keep_alive(req.keep_alive());	
 
 		res.body() = std::move(value);
 		res.prepare_payload();

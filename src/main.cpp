@@ -75,7 +75,7 @@ int main(int argc, char** argv)
     <div class="container">
         <h1>Welcome to PharmaOffice!</h1>
         <p>We are attempting to change the way pharmacy is practiced in Nigeria, through innovation.</p>
-        <a href="#" class="button">Get PharmaOffice</a>
+        <a href="app/getoffice" class="button">Get PharmaOffice</a>
     </div>
 </body>
 </html>

@@ -11,6 +11,38 @@
 
 #include <algorithm>
 //products
+namespace grape {
+	//formulary access level
+	enum class formulary_access_level : std::uint8_t {
+		ACCESS_PRIVATE = 0x01,
+		ACCESS_PUBLIC = 0x02,
+	};
+
+	//order state
+	enum class order_state : std::uint32_t {
+		PENDING,
+		ORDERED,
+		COMPLETED,
+		DELIVERED,
+	};
+
+	//warning level
+	enum class warning_level : std::uint32_t {
+		SIMPLE,
+		CRITICAL,
+	};
+
+	//actions
+	enum class action :std::uint32_t
+	{
+		STOCK_CHECKED,
+		BROUGHT_FORWARD,
+		CHECK_TIME,
+		DATA_BACKUP,
+	};
+};
+
+
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), product, 
 	(boost::uuids::uuid, id)
@@ -35,6 +67,15 @@ using opt_field_string = grape::optional_field<std::string, N>;
 
 template<size_t N>
 using opt_field_uint64_t = grape::optional_field<std::uint64_t, N>;
+
+template<size_t N>
+using opt_field_time_point = grape::optional_field<std::chrono::system_clock::time_point, N>;
+
+template<size_t N>
+using opt_field_currency = grape::optional_field<pof::base::currency, N>;
+
+template<size_t N>
+using opt_field_uuid = grape::optional_field<boost::uuids::uuid, N>;
 
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), product_opt,
@@ -96,6 +137,20 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::uint64_t, category_id)
 )
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), pharma_product_opt,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+	(grape::opt_fields, fields)
+	(opt_field_currency<0>, unitprice)
+	(opt_field_currency<1>, costprice)
+	(opt_field_uint64_t<2>, stock_count)
+	(opt_field_uint64_t<3>, min_stock_count)
+	(opt_field_time_point<4>, date_added)
+	(opt_field_time_point<5>, date_expired)
+	(opt_field_uint64_t<6>, category_id)
+)
 
 
 //collections
@@ -109,161 +164,42 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::vector<grape::pharma_product>, group)
 )
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), formulary,
+	(boost::uuids::uuid, id)
+	(boost::uuids::uuid, creator_id)
+	(std::string, name)
+	(std::string, created_by)
+	(std::chrono::system_clock::time_point, created_date)
+	(std::string, version)
+	(grape::formulary_access_level, access_level)
+)
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), order,
+	(grape::order_state, state)
+	(boost::uuids::uuid, id)
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+	(pof::base::currency, total_cost)
+	(std::uint64_t, quantity)
+)
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), warnings,
+	(grape::warning_level, state)
+	(boost::uuids::uuid, id)
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+	(std::string, warning_text)
+)
+
 
 namespace grape {
 	class ProductManager : public boost::noncopyable {
 	public:
-		enum : std::uint8_t {
-			FORMULARY_ID,
-			FORMULARY_CREATOR_ID,
-			FORMULARY_NAME,
-			FORMULARY_CREATED_BY_NAME,
-			FORMULARY_CREATED_DATE,
-			FORMULARY_VERSION,
-			FORMULARY_ACCESS_LEVEL
-		};
-
-		//formulary access level
-		enum : std::uint8_t {
-			ACCESS_PRIVATE =  0x01,
-			ACCESS_PUBLIC  =  0x02,
-		};
-
-		//formulary content
-		enum : std::uint8_t {
-			FORUMARY_ID,
-			PRODUCT_ID
-		};
-
-		//pharmacy products
-		enum : std::uint8_t {
-			PHARMACY_ID,
-			BRANCH_ID,
-			PHARMA_PRODUCT_ID,
-			PHARMA_PRODUCT_UNIT_PRICE,
-			PHARMA_PRODUCT_COST_PRICE,
-			PHARMA_PRODUCT_STOCK_COUNT, // TRACKS THE PRESENT STOCK OF THE PRODUCT
-			PHARMA_PRODUCT_MIN_STOCK_COUNT,
-			PHARMA_PRODUCT_DATE_ADDED,
-			PHARMA_PRODUCT_DATE_EXPIRE,
-			PHARMA_PRODUCT_CATEGORY,
-		};
-
-		//products table
-		enum : std::uint8_t {
-			PRODUCT_UUID,
-			PRODUCT_SERIAL_NUM,
-			PRODUCT_NAME,
-			PRODUCT_GENERIC_NAME, //FOR PHARMACEUTICES WITH GENERIC NAME, MIGHT CONTAIN MORE THAN ONE GENERIC NAME FOR EXAMPLE ATHERTHER/LUMEFANTRINE 
-			PRODUCT_CLASS,
-			PRODUCT_FORMULATION,
-			PRODUCT_STRENGTH, // GIVEN IN mg, g %v/v, %m/v -> need to have a list of approved stengths,
-			PRODUCT_STRENGTH_TYPE, // GIVEN as mg, g %v/v, %m/v -> need to have a list of approved stengths,
-			PRODUCT_USAGE_INFO,
-			PRODUCT_DESCRIP,
-			PRODUCT_HEALTH_CONDITIONS, //COMMA SEPERATED
-			PRODUCT_PACKAGE_SIZE,
-			PRODUCT_SIDEEFFECTS,
-			PRODUCT_BARCODE,
-			PRODUCT_MANUFACTURES_NAME,
-			PRODUCT_MAX
-		};
-
-		enum : std::uint8_t {
-			INVENTORY_PHARMACY_UUID,
-			INVENTORY_BRANCH_UUID,
-			INVENTORY_ID,
-			INVENTORY_PRODUCT_UUID, //same UUID AS THE PRODUCT
-			INVENTORY_EXPIRE_DATE, // MMYY FORMAT 
-			INVENTORY_INPUT_DATE, // DATE ADDED 
-			INVENTORY_STOCK_COUNT, //THE STOCK ASSOCIATED WITH THIS INVENTORY
-			INVENTORY_COST, //INVENTORY COST PRICE
-			INVENTORY_SUPPLIER_ID,
-			INVENTORY_LOT_NUMBER, //HAVE MULTIPLE BACTHES -> 
-			INVENTORY_MAX
-		};
-
-		enum : std::uint8_t {
-			CATEGORY_PHARMACY_UUID,
-			CATEGORY_BRANCH_UUID,
-			CATEGORY_ID,
-			CATEGORY_NAME,
-			CATEGORY_MAX
-		};
-
-		enum : std::uint8_t {
-			ORDER_BRANCH_UUID,
-			ORDER_PRODUCT_UUID,
-			ORDER_PRODUCT_NAME,
-			ORDER_DATE,
-			ORDER_QUANTITY,
-			ORDER_COST,
-			ORDER_STATE,
-			ORDER_MAX
-		};
-
-		enum : std::uint8_t {
-			PACK_PHARAMCY_UUID,
-			PACK_BRANCH_UUID,
-			PACK_UUID,
-			PACK_PROD_UUID,
-			PACK_PROD_QUANTITY,
-			PACK_PROD_EXT_COST,
-			PACK_PROD_MAX
-		};
-
-		//suppliers ?? what are there in the context of grape juice??
-		enum : std::uint8_t {
-			SUPPLIER_ID,
-			SUPPLIER_NAME,
-			SUPPLIER_DATE_CREATED,
-			SUPPLIER_DATE_MODIFIED,
-			SUPPLIER_INFO,
-			SUPPLIER_MAX
-		};
-
-		enum :std::uint8_t {
-			INVOICE_PHARMACY_ID,
-			INVOICE_BRANCH_ID,
-			INVOICE_SUPP_ID,
-			INVOICE_ID,
-			INVOICE_PROD_UUID,
-			INVOICE_INVENTORY_ID,
-			INVOICE_MAX,
-		};
-
-		enum : std::uint8_t {
-			EXPIRED_PHARMACY_ID,
-			EXPIRED_BRANCH_ID,
-			EXPIRED_PRODUCT_ID,
-			EXPIRED_QUANTITY,
-			EXPIRED_DATE,
-		};
-
-		//order state
-		enum : std::uint8_t {
-			PENDING,
-			ORDERED,
-			COMPLETED,
-			DELIVERED,
-		};
-
-
-		//warning level
-		enum : std::uint8_t {
-			SIMPLE,
-			CRITICAL,
-		};
-
-		//actions
-		enum :std::uint8_t
-		{
-			STOCK_CHECKED,
-			BROUGHT_FORWARD,
-			CHECK_TIME,
-			DATA_BACKUP,
-		};
-
 		ProductManager();
 		~ProductManager();
 
@@ -277,28 +213,31 @@ namespace grape {
 		void CreateInvoiceTable();
 		void CreateExpiredTable();
 		void CreatePharmacyProductTable();
+		void CreateFormularyTable();
+		void CreateOrderTable();
+		void CreateWarningTable();
 
 		//utilities
 		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
 
 		//routes
 		void SetRoutes();
+		
+		//product routes
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		
+		//formulary routes
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
 		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnAddProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnUpdateProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+			OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 
 		// mysql procedures

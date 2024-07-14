@@ -26,7 +26,7 @@ namespace grape
 	concept Pods = std::is_pod_v<T> && !Integers<T>;
 
 	template<typename T>
-	concept Enums = std::is_enum_v <T>;
+	concept Enums = std::is_enum_v<T>;
 
 	template<typename T>
 	concept FusionStruct = boost::mpl::is_sequence<T>::value;
@@ -82,7 +82,9 @@ namespace grape
 
 			template<Enums E>
 			void operator()(E& e) const {
-				
+				typename std::underlying_type<E>::type v;
+				(*this)(v);
+				e = static_cast<E>(v);
 			}
 
 			void operator()(std::chrono::system_clock::time_point& tp) const {
@@ -174,6 +176,12 @@ namespace grape
 			void operator()(const T& i) const {
 				*boost::asio::buffer_cast<T*>(buf_) = bswap(i);
 				buf_ += sizeof(T);
+			}
+
+			template<Enums E>
+			void operator()(E& e) const {
+				auto i = static_cast<std::underlying_type_t<E>>(e);
+				(*this)(i);
 			}
 
 			void operator()(const std::chrono::system_clock::time_point& tp) const {
