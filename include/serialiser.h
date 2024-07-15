@@ -23,7 +23,7 @@ namespace grape
 	concept Integers = std::is_integral_v<T>  || std::is_floating_point_v<T>;
 
 	template<typename T>
-	concept Pods = std::is_pod_v<T> && !Integers<T>;
+	concept Pods = std::is_pod_v<T> && !Integers<T> && !std::is_enum_v<T>;
 
 	template<typename T>
 	concept Enums = std::is_enum_v<T>;
@@ -267,38 +267,38 @@ namespace grape
 			mutable opt_fields::bits_type opt_;
 
 			template<Integers T>
-			void operator()(const T& i) const {
+			constexpr void operator()(const T& i) const {
 				size += sizeof(T);
 			}
 
-			void operator()(const std::chrono::system_clock::time_point& tp) const {
+			constexpr void operator()(const std::chrono::system_clock::time_point& tp) const {
 				size += sizeof(std::chrono::system_clock::rep);
 			}
 
-			void operator()(const boost::uuids::uuid& uuid)  const {
+			constexpr void operator()(const boost::uuids::uuid& uuid)  const {
 				size += uuid.static_size();
 			}
 
-			void operator()(const std::string& str) const {
+			constexpr void operator()(const std::string& str) const {
 				size += sizeof(std::uint32_t);
 				size += str.size();
 			}
 
-			void operator()(const pof::base::currency& cur) const {
+			constexpr void operator()(const pof::base::currency& cur) const {
 				size += cur.data().size();
 			}
 			template<Pods P>
-			void operator()(const P& p) const {
+			constexpr void operator()(const P& p) const {
 				size += sizeof(P);
 			}
 
 			template<size_t N>
-			void operator()(const std::array<char, N>& fixed) const {
+			constexpr void operator()(const std::array<char, N>& fixed) const {
 				size += N;
 			}
 
 			template<FusionStruct T>
-			void operator()(const T& val) const {
+			constexpr void operator()(const T& val) const {
 				boost::fusion::for_each(val, *this);
 			}
 

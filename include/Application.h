@@ -54,7 +54,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 
 //file buffer
 BOOST_FUSION_DEFINE_STRUCT(
-	(grape), file, 
+	(grape), file,
 	(std::string, name)
 	(std::vector<std::uint8_t>, content)
 )
@@ -72,9 +72,21 @@ BOOST_FUSION_DEFINE_STRUCT(
 )
 
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), page,
+	(std::uint32_t, begin)
+	(std::uint32_t, limit)
+)
+
+
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
 namespace grape {
+	template<typename T>
+		requires grape::FusionStruct<T>
+	using collection_type = boost::fusion::vector<std::vector<T>>;
+
+
 	using request = pof::base::net_manager::req_t;
 	using response = pof::base::net_manager::res_t;
 

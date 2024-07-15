@@ -792,12 +792,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 			"costprice",
 			"stock_count",
 			"min_stock_count",
-			"date_added datetime",
-			"date_expire datetime",
+			"date_added",
+			"date_expire",
 			"category_id"
 		};
 		std::ostringstream os;
-		os << "UPDATE products pharma_products";
+		os << "UPDATE pharma_products SET ";
 		using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::pharma_product_opt>::value>;
 		boost::fusion::for_each(range(), [&](auto i) {
 			using int_type = std::decay_t<decltype(i)>;
@@ -836,6 +836,24 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.product_id.begin(), pp_opt.product_id.end())));
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.pharmacy_id.begin(), pp_opt.pharmacy_id.end())));
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.branch_id.begin(), pp_opt.branch_id.end())));
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
 	}
 	catch (const std::exception& exp) {
 		
@@ -872,3 +890,366 @@ void grape::ProductManager::RemovePharamProducts()
 		spdlog::error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnAddInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	thread_local static boost::uuids::random_generator_mt19937 uuidGen{};
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("Post method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [inven, buf2] = grape::serial::read<grape::inventory>(buf);
+		inven.id = uuidGen();
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?,?,?);)");
+		query->m_arguments = {{
+			boost::mysql::field(boost::mysql::blob(inven.pharmacy_id.begin(), inven.pharmacy_id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.branch_id.begin(), inven.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.id.begin(), inven.id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.product_id.begin(), inven.product_id.end())),
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+							boost::mysql::datetime::time_point::duration>(inven.expire_date))),
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+							boost::mysql::datetime::time_point::duration>(inven.input_date))),
+			boost::mysql::field(inven.stock_count),
+			boost::mysql::field(boost::mysql::blob(inven.cost.data().begin(), inven.cost.data().end())),
+			boost::mysql::field(boost::mysql::blob(inven.supplier_id.begin(), inven.supplier_id.end())),
+			boost::mysql::field(inven.lot_number)
+		}};
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Inventory added");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+
+}
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnRemoveInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::delete_) {
+			co_return app->mNetManager.bad_request("Delete method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [inven, buf2] = grape::serial::read<grape::inventory>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM inventory WHERE id = ? AND product_id = ? AND pharmacy_id = ? AND branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(inven.id.begin(), inven.id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.product_id.begin(), inven.product_id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.pharmacy_id.begin(), inven.pharmacy_id.end())),
+			boost::mysql::field(boost::mysql::blob(inven.branch_id.begin(), inven.branch_id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Inventory removed");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+
+}
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnUpdateInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		using update_type = boost::fusion::vector<
+			boost::uuids::uuid,
+			boost::uuids::uuid,
+			boost::uuids::uuid,
+			boost::uuids::uuid,
+			opt_fields,
+			opt_field_time_point<0>,
+			opt_field_time_point<2>,
+			opt_field_uint64_t<3>,
+			opt_field_currency<4>,
+			opt_field_string<5>
+		>;
+		auto&& [uinven, buf2] = grape::serial::read<update_type>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_arguments.resize(1);
+		constexpr static const std::array<std::string_view, 8> names = {
+			"pharmacy_id",
+			"branch_id",
+			"id",
+			"product_id",
+			"expire_date",
+			"input_date",
+			"cost",
+			"lot_number",
+		};
+
+		std::ostringstream os;
+		os << "UPDATE inventory SET ";
+		using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<update_type>::value>;
+		boost::fusion::for_each(range(), [&](auto i) {
+			using int_type = std::decay_t<decltype(i)>;
+			using type = std::decay_t<decltype(boost::fusion::at<int_type>(uinven))>;
+			if constexpr (grape::is_optional_field<type>::value) {
+				type& p = boost::fusion::at<int_type>(uinven);
+				if (p.has_value()) {
+					if constexpr (int_type::value != 1) {
+						os << ",";
+					}
+					os << fmt::format("{} = ?", names[int_type::value]);
+					if constexpr (std::disjunction_v<std::is_same<typename type::value_type, boost::uuids::uuid>,
+						std::is_array<typename type::value_type>>) {
+						query->m_arguments[0].push_back(boost::mysql::field(
+							boost::mysql::blob(p.value().begin(),
+								p.value().end())));
+					}
+					else if constexpr (std::is_same<typename type::value_type, pof::base::currency>::value) {
+						typename type::value_type& t = p.value();
+						query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(
+							t.data().begin(), t.data().end())));
+					}
+					else if constexpr (std::is_same_v<typename type::value_type, std::chrono::system_clock::time_point>) {
+						typename type::value_type& t = p.value();
+						query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+							boost::mysql::datetime::time_point::duration>(t))));
+					}
+					else {
+						typename type::value_type& t = p.value();
+						query->m_arguments[0].push_back(boost::mysql::field(t));
+					}
+				}
+			}
+			});
+
+		os << "WHERE pharmacy_id = ? AND branch_id = ?  AND id = ? AND product_id = ?;";
+		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<0>(uinven).begin(), boost::fusion::at_c<0>(uinven).end())));
+		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<1>(uinven).begin(), boost::fusion::at_c<1>(uinven).end())));
+		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<2>(uinven).begin(), boost::fusion::at_c<2>(uinven).end())));
+		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<3>(uinven).begin(), boost::fusion::at_c<3>(uinven).end())));
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Inventory updated");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Put method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [prod_id, buf2] = grape::serial::read<grape::product_identifier>(buf);
+		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT pharmacy_id,
+			branch_id, id, product_id, expire_date, input_date, stock_count, cost, supplier_id,lot_number,
+			ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY input_date DESC) AS row_id 
+			FROM inventory 
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? AND row_id BETWEEN ? AND ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(prod_id.pharmacy_id.begin(), prod_id.pharmacy_id.end())),
+			boost::mysql::field(boost::mysql::blob(prod_id.branch_id.begin(),	prod_id.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(prod_id.product_id.begin(), prod_id.product_id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.limit)
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No inventory for product");
+		}
+
+		grape::collection_type<grape::inventory> collect;
+		auto& collection = boost::fusion::at_c<0>(collect);
+		collection.reserve(data->size());
+		for (auto&& d : *data) {
+			collection.emplace_back(grape::serial::build<grape::inventory>(d.first));
+		}
+		
+		//create payload
+		const size_t size = grape::serial::get_size(collect);
+		grape::response::body_type::value_type value(size, 0x00);
+		grape::serial::write(boost::asio::buffer(value), collect);
+
+		grape::response res{ http::status::ok, 11 };
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "application/octlet-stream");
+		res.keep_alive(req.keep_alive());
+		res.body() = std::move(value);
+		res.prepare_payload();
+		co_return res;
+	}
+	catch (const std::exception& exp) {
+		
+	}
+}
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Put method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [prod_id, buf2] = grape::serial::read<grape::product_identifier>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT COUNT(id) FROM inventory 
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? GROUP BY product_id;)");
+		query->m_arguments = { {
+		boost::mysql::field(boost::mysql::blob(prod_id.pharmacy_id.begin(), prod_id.pharmacy_id.end())),
+		boost::mysql::field(boost::mysql::blob(prod_id.branch_id.begin(),	prod_id.branch_id.end())),
+		boost::mysql::field(boost::mysql::blob(prod_id.product_id.begin(), prod_id.product_id.end())),
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No inventory for product");
+		}
+		const size_t size = boost::variant2::get<std::uint64_t>(data->begin()->first[0]);
+
+		grape::response::body_type::value_type value(sizeof(std::uint64_t), 0x00);
+		*boost::asio::buffer_cast<std::uint64_t*>(boost::asio::buffer(value)) =  grape::bswap(size);
+
+		grape::response res{ http::status::ok, 11 };
+		res.set(http::field::server, USER_AGENT_STRING);
+		res.set(http::field::content_type, "application/octlet-stream");
+		res.keep_alive(req.keep_alive());
+		res.body() = std::move(value);
+		res.prepare_payload();
+		co_return res;
+		
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+

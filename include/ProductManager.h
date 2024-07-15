@@ -152,6 +152,12 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(opt_field_uint64_t<6>, category_id)
 )
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), product_identifier,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+)
 
 //collections
 BOOST_FUSION_DEFINE_STRUCT(
@@ -228,16 +234,28 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacyProductCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		
 		//formulary routes
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+		//category
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+		//inventory
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
 
 
 		// mysql procedures
