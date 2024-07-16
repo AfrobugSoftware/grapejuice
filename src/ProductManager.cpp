@@ -328,6 +328,12 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/addproducts"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/addformulary"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/updatepharmaproduct"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
+
+	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
+	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
+	app->route("/product/inventory/update"s, std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
+	app->route("/product/inventory/get"s, std::bind_front(&grape::ProductManager::OnGetInventory, this));
+	app->route("/product/inventory/getcount"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
 	
 }
 
@@ -864,6 +870,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 void grape::ProductManager::Procedures()
 {
 	RemovePharamProducts();
+	RemoveCategory();
 }
 
 void grape::ProductManager::RemovePharamProducts()
@@ -888,6 +895,29 @@ void grape::ProductManager::RemovePharamProducts()
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
+	}
+}
+
+void grape::ProductManager::RemoveCategory()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE PROCEDURE IF NOT EXISTS remove_category(IN pharm_id binary(16), IN bid binary(16), IN cid integer)
+			   BEGIN
+				START TRANSACTION;
+					UPDATE pharma_product SET category_id = 0 WHERW pharmacy_id = pharm_id AND branch_id = bid AND category_id = cid;
+					DELETE FROM categories WHERE category_id  = cid;
+				COMMIT;
+			  END;
+		)");
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		(void)fut.get(); //block until complete
+	}
+	catch (const std::exception& exp) {
+		
 	}
 }
 
@@ -1252,4 +1282,169 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnAddCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("Put method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [categories, buf2] = grape::serial::read<grape::collection_type<grape::category>>(buf);
+		auto& cc = boost::fusion::at_c<0>(categories);
+		
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO category VALUES (?,?,?,?))");
+		query->m_arguments.reserve(cc.size());
+		for (auto&& c : cc) {
+			query->m_arguments.emplace_back(grape::serial::make_mysql_arg(c));
+		}
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Added category");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnRemoveCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::delete_) {
+			co_return app->mNetManager.bad_request("Delete method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [category, buf2] = grape::serial::read<grape::category>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(CALL remove_category(?,?,?))");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(category.pharmacy_id.begin(), category.pharmacy_id.end())),
+			boost::mysql::field(boost::mysql::blob(category.branch_id.begin(), category.branch_id.end())),
+			boost::mysql::field(category.category_id)
+		} }; 
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Removed category");
+
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnUpdateCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	co_return grape::response{};
+
+}
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnGetCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Put method expected");
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM categories WHERE pharmacy_id = ? AND branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No inventory for product");
+		}
+		grape::collection_type<grape::category> categories;
+		auto& v = boost::fusion::at_c<0>(categories);
+		v.reserve(data->size());
+		for (const auto& d : *data) {
+			v.emplace_back(grape::serial::build<grape::category>(d.first));
+		}
+		
+		co_return app->OkResult(categories, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 

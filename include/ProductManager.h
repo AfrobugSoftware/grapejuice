@@ -203,6 +203,14 @@ BOOST_FUSION_DEFINE_STRUCT(
 )
 
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), category,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(std::uint64_t, category_id)
+	(std::string, name)
+)
+
 namespace grape {
 	class ProductManager : public boost::noncopyable {
 	public:
@@ -248,6 +256,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		//inventory
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
@@ -261,6 +270,7 @@ namespace grape {
 		// mysql procedures
 		void Procedures();
 		void RemovePharamProducts();
+		void RemoveCategory();
 
 	};
 };

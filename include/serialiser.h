@@ -381,6 +381,61 @@ namespace grape
 			});
 		}
 
+		template<typename T> requires FusionStruct<T>
+		auto make_mysql_arg(const T& f) -> std::vector<boost::mysql::field>
+		{
+			std::vector<boost::mysql::field> ret;
+			ret.reserve(boost::mpl::size<T>::value);
+			auto func_opt = [&](auto& t) {
+				using type = std::decay_t<decltype(t)>;
+				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>,
+					std::is_array<type>>) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::blob(t.begin(), t.end())));
+				}
+				else if constexpr (std::is_same<type, pof::base::currency>::value) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::blob(t.data().begin(), t.data().end())));
+				}
+				else if constexpr (std::is_same_v<type, std::chrono::system_clock::time_point>) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+						boost::mysql::datetime::time_point::duration>(t))));
+				}
+				else if constexpr (std::is_enum_v<type>) {
+					ret.emplace_back(boost::mysql::field(static_cast<std::underlying_type_t<type>>(t)));
+				}
+				else if constexpr (grape::is_optional_field_set<type>::value) {}
+				else {
+					ret.emplace_back(boost::mysql::field(t));
+				}
+			};
+
+			auto func = [&](auto& t) {
+				using type = std::decay_t<decltype(t)>;
+				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>,
+					std::is_array<type>>) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::blob(t.begin(), t.end())));
+				}
+				else if constexpr (std::is_same<type, pof::base::currency>::value) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::blob(t.data().begin(), t.data().end())));
+				}
+				else if constexpr (std::is_same_v<type, std::chrono::system_clock::time_point>) {
+					ret.emplace_back(boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+						boost::mysql::datetime::time_point::duration>(t))));
+				}
+				else if constexpr (std::is_enum_v<type>) {
+					ret.emplace_back(boost::mysql::field(static_cast<std::underlying_type_t<type>>(t)));
+				}
+				else if constexpr (grape::is_optional_field_set<type>::value) {}
+				else if constexpr (grape::is_optional_field<type>::value) {
+					if (t.has_value()) func_opt(t.value());
+				}
+				else {
+					ret.emplace_back(boost::mysql::field(t));
+				}
+			};
+
+			boost::fusion::for_each(f, func);
+			return ret;
+		}
 
 		template<FusionStruct T>
 		std::pair<T, boost::asio::const_buffer> read(boost::asio::const_buffer b) {
