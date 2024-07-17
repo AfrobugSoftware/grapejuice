@@ -13,7 +13,7 @@
 //products
 namespace grape {
 	//formulary access level
-	enum class formulary_access_level : std::uint8_t {
+	enum class formulary_access_level : std::uint32_t {
 		ACCESS_PRIVATE = 0x01,
 		ACCESS_PUBLIC = 0x02,
 	};
@@ -228,6 +228,7 @@ namespace grape {
 		void CreateExpiredTable();
 		void CreatePharmacyProductTable();
 		void CreateFormularyTable();
+		void CreateFormularyContentTable();
 		void CreateOrderTable();
 		void CreateWarningTable();
 
@@ -244,13 +245,15 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacyProductCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		
 		//formulary routes
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormularyProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		//category
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
@@ -265,12 +268,13 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-
+		//inter branch product management
 
 		// mysql procedures
 		void Procedures();
 		void RemovePharamProducts();
 		void RemoveCategory();
+		void RemoveFormulary();
 
 	};
 };

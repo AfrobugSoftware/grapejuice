@@ -264,11 +264,16 @@ namespace grape
 		class sizer {
 		public:
 			mutable size_t size = 0;
-			mutable opt_fields::bits_type opt_;
 
 			template<Integers T>
 			constexpr void operator()(const T& i) const {
 				size += sizeof(T);
+			}
+
+			template<Enums T>
+			constexpr void operator()(const T& i) const {
+				using htype = std::underlying_type_t<std::decay_t<T>>;
+				size += sizeof(htype);
 			}
 
 			constexpr void operator()(const std::chrono::system_clock::time_point& tp) const {
@@ -304,7 +309,6 @@ namespace grape
 
 			template<typename T, size_t N>
 			void operator()(const optional_field_set<T,N>& t) const {
-				opt_.reset();
 				size += sizeof(opt_fields::value_type);
 			}
 
@@ -355,6 +359,13 @@ namespace grape
 					if (boost::variant2::holds_alternative<get_type>(row[constant::value])) {
 						boost::fusion::at<constant>(ret).value() =
 							std::move(boost::variant2::get<get_type>(row[constant::value]));
+					}
+				}
+				else if constexpr (std::is_enum_v<arg_type>) {
+					using htype = std::underlying_type_t<arg_type>;
+					if (boost::variant2::holds_alternative<htype>(row[constant::value])) {
+						boost::fusion::at<constant>(ret) =
+							static_cast<arg_type>(std::move(boost::variant2::get<htype>(row[constant::value])));
 					}
 				}
 				else{

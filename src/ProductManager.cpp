@@ -326,15 +326,25 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
 	app->route("/product/removeproducts"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
 	app->route("/product/addproducts"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
-	app->route("/product/addformulary"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/updatepharmaproduct"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
+
+	app->route("/product/formulary/add"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
+	app->route("/product/formulary/remove", std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
+	app->route("/product/formulary/get", std::bind_front(&grape::ProductManager::OnGetFormulary, this));
+	app->route("/product/formulary/getproducts", std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
+	app->route("/product/formulary/getformularyproducts", std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
 
 	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
 	app->route("/product/inventory/update"s, std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
 	app->route("/product/inventory/get"s, std::bind_front(&grape::ProductManager::OnGetInventory, this));
 	app->route("/product/inventory/getcount"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
+
 	
+	app->route("/product/category/add", std::bind_front(&grape::ProductManager::OnAddCategory, this));
+	app->route("/product/category/remove", std::bind_front(&grape::ProductManager::OnRemoveCategory, this));
+	app->route("/product/category/update", std::bind_front(&grape::ProductManager::OnUpdateCategory, this));
+	app->route("/product/category/get", std::bind_front(&grape::ProductManager::OnGetCategory, this));
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -692,13 +702,207 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
-	return boost::asio::awaitable<pof::base::net_manager::res_t>();
-}
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Get method expected");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
 
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM formulary WHERE access_level = ? OR creator_id = ? LIMIT 100;)");
+		query->m_arguments = { {
+			boost::mysql::field(static_cast<std::underlying_type_t<
+				grape::formulary_access_level>>(grape::formulary_access_level::ACCESS_PUBLIC)),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No formularies");
+		}
+
+		grape::collection_type<grape::formulary> forms;
+		auto& v = boost::fusion::at_c<0>(forms);
+		v.reserve(data->size());
+
+		for (const auto& d : *data) {
+			v.emplace_back(grape::serial::build<grape::formulary>(d.first));
+		}
+
+		co_return app->OkResult(forms);
+	}
+	catch (const std::exception& exp) {
+		co_return  app->mNetManager.server_error(exp.what());
+	}
+}
+//gets the products in this formulary that are also in the pharmacy
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
-	return boost::asio::awaitable<pof::base::net_manager::res_t>();
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Get method expected");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [form, buf2] = grape::serial::read<grape::formulary>(buf);
+		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT  p.id,
+				p.serial_num,
+				p.name,
+				p.generic_name,
+				p.class,
+				p.formulation,
+				p.strength,
+				p.strength_type,
+				p.usage_info,
+				pp.sell_price,
+				pp.cost_price,
+				p.package_size,
+				pp.stock_count,
+				p.sideeffects,
+				p.barcode,
+				pp.category_id,
+				pp.min_stock_count
+			ROW_NUMBER() OVER ( ORDER BY p.name) AS row_id
+			FROM products p, pharma_product pp, formulary_content fc
+			WHERE pp.product_id = p.id AND  fc.product_id = p.id AND fc.id = ? AND row_id BETWEEN ? AND ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No formularies");
+		}
+		using vector_type = boost::fusion::vector<boost::uuids::uuid, std::uint64_t,
+			std::string, std::string, std::string, std::string, std::string, std::string, std::string, pof::base::currency,
+			pof::base::currency, std::uint64_t, std::uint64_t, std::string, std::string, std::uint64_t, std::uint64_t, std::uint64_t>;
+		grape::collection_type<vector_type> collection;
+		auto& v = boost::fusion::at_c<0>(collection);
+		v.reserve(data->size());
+
+		for (auto& d : *data) {
+			v.emplace_back(grape::serial::build<vector_type>(d.first));
+		}
+
+		co_return app->OkResult(collection);
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnGetFormularyProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Get method expected");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [form, buf2] = grape::serial::read<grape::formulary>(buf);
+		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
+		
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT p.id
+				p.serial_num,
+				p.name,
+				p.generic_name,
+				p.class,
+				p.formulation,
+				p.strength,
+				p.strength_type,
+				p.usage_info,
+				p.sideeffects,
+				p.barcode,
+			ROW_NUMBER() OVER ( ORDER BY p.name) AS row_id
+			FROM products p, formulary_content fc
+			WHERE p.id = fc.product_id AND fc.formulary_id = ? AND row_id BETWEEN ? AND ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No formularies");
+		}
+
+		collection_type<grape::product> products;
+		auto& v = boost::fusion::at_c<0>(products);
+		v.reserve(data->size());
+
+		for (auto& d : *data) {
+			v.emplace_back(grape::serial::build<grape::product>(d.first));
+		}
+		co_return app->OkResult(products);
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
@@ -711,8 +915,38 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnA
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
 
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
 
+		auto&& [pp, buf2] = grape::serial::read<grape::pharma_product>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO pharma_product VALUES (?,?,?,?,?,?,?,?,?,?);)");
 
+		query->m_arguments = { {
+				grape::serial::make_mysql_arg(pp)
+		}};
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+		
+		co_return app->OkResult("Product added");
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
@@ -773,6 +1007,53 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnC
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t>
+grape::ProductManager::OnRemoveFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::delete_) {
+			co_return app->mNetManager.bad_request("Get method expected");
+		}
+
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [form, buf2] = grape::serial::read<grape::formulary>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(CALL remove_formulary(?);)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(form.id.begin(),
+			 form.id.end()))
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+			
+		co_return app->OkResult("Formulary removed");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
 	auto app = grape::GetApp();
@@ -862,7 +1143,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 
 	}
 	catch (const std::exception& exp) {
-		
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 
@@ -871,6 +1152,7 @@ void grape::ProductManager::Procedures()
 {
 	RemovePharamProducts();
 	RemoveCategory();
+	RemoveFormulary();
 }
 
 void grape::ProductManager::RemovePharamProducts()
@@ -917,7 +1199,7 @@ void grape::ProductManager::RemoveCategory()
 		(void)fut.get(); //block until complete
 	}
 	catch (const std::exception& exp) {
-		
+		spdlog::error(exp.what());
 	}
 }
 
@@ -1387,7 +1669,55 @@ grape::ProductManager::OnRemoveCategory(pof::base::net_manager::req_t&& req, boo
 boost::asio::awaitable<pof::base::net_manager::res_t> 
 grape::ProductManager::OnUpdateCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
-	co_return grape::response{};
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put method expected");
+
+		}
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [category, buf2] = grape::serial::read<grape::category>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE category SET name = ?	WHERE pharmacy_id = ? AND branch_id = ? AND category_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(category.name),
+			boost::mysql::field(boost::mysql::blob(category.pharmacy_id.begin(), category.pharmacy_id.end())),
+			boost::mysql::field(boost::mysql::blob(category.branch_id.begin(), category.branch_id.end())),
+			boost::mysql::field(category.category_id)
+		} };
+
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("Category updated");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
 
 }
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -1447,4 +1777,25 @@ grape::ProductManager::OnGetCategory(pof::base::net_manager::req_t&& req, boost:
 	}
 }
 
+void grape::ProductManager::RemoveFormulary() {
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE PROCEDURE IF NOT EXISTS remove_formulary (IN form_id binary(16))
+			   BEGIN
+				START TRANSACTION;
+					DELETE FROM formulary WHERE id = form_id;
+					DELETE FROM formulary_content WHERE formulary_id = form_id;
+				COMMIT;
+			  END;
+		)");
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		(void)fut.get(); //block until complete
+	}
+	catch (const std::exception& exp) {
+
+	}
+}
 
