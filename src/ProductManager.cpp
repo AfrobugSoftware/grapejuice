@@ -265,7 +265,7 @@ void grape::ProductManager::CreateOrderTable()
 				branch_id binary(16),
 				product_id binary(16),
 				total_cost binary(17),
-				quantity integer,
+				quantity integer
 		);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -291,7 +291,7 @@ void grape::ProductManager::CreateWarningTable()
 				pharmacy_id binary(16),
 				branch_id binary(16),
 				product_id binary(16),
-				warning_text text,
+				warning_text text
 			);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -1188,7 +1188,7 @@ void grape::ProductManager::RemoveCategory()
 			R"(CREATE PROCEDURE IF NOT EXISTS remove_category(IN pharm_id binary(16), IN bid binary(16), IN cid integer)
 			   BEGIN
 				START TRANSACTION;
-					UPDATE pharma_product SET category_id = 0 WHERW pharmacy_id = pharm_id AND branch_id = bid AND category_id = cid;
+					UPDATE pharma_products SET category_id = 0 WHERE pharmacy_id = pharm_id AND branch_id = bid AND category_id = cid;
 					DELETE FROM categories WHERE category_id  = cid;
 				COMMIT;
 			  END;
@@ -1795,7 +1795,7 @@ void grape::ProductManager::RemoveFormulary() {
 		(void)fut.get(); //block until complete
 	}
 	catch (const std::exception& exp) {
-
+		spdlog::error(exp.what());
 	}
 }
 
