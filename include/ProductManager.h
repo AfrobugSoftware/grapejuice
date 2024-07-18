@@ -253,6 +253,9 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetFormularyProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddFormularyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveFormularyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 
 		//category
@@ -267,6 +270,9 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+		//expired products
+
 
 		//inter branch product management
 
