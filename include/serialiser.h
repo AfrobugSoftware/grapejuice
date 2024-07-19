@@ -32,7 +32,7 @@ namespace grape
 	concept FusionStruct = boost::mpl::is_sequence<T>::value;
 
 	template<Integers T>
-	auto bswap(const T& value) -> T {
+	constexpr auto bswap(const T& value) -> T {
 		auto value_representation = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
 		std::ranges::reverse(value_representation);
 		return std::bit_cast<T>(value_representation);
@@ -85,6 +85,16 @@ namespace grape
 				typename std::underlying_type<E>::type v;
 				(*this)(v);
 				e = static_cast<E>(v);
+			}
+
+			void operator()(std::chrono::year_month_day& ymd) const {
+				const std::uint32_t i = bswap(*boost::asio::buffer_cast<const std::uint32_t*>(buf_));
+				const short y = (i & 0xFFFF0000) >> 16;
+				const char m =  (i & 0x0000FF00) >> 8;
+				const char d =  i & 0x000000FF;
+				ymd = std::chrono::year_month_day(std::chrono::year(y), std::chrono::month(m), std::chrono::day(d));
+				
+				buf_ += sizeof(std::uint32_t);
 			}
 
 			void operator()(std::chrono::system_clock::time_point& tp) const {
@@ -184,6 +194,15 @@ namespace grape
 				(*this)(i);
 			}
 
+			void operator()(const std::chrono::year_month_day& ymd) const {
+				const std::uint16_t y = static_cast<int>(ymd.year());
+				const std::uint16_t dm = (static_cast<std::uint16_t>((static_cast<unsigned>(ymd.month()))) << 8) | 
+					 static_cast<std::uint16_t>(static_cast<unsigned>(ymd.day()));
+				const std::uint32_t tt = static_cast<std::uint32_t>(y)  << 16 | static_cast<std::uint32_t>(dm);
+				*boost::asio::buffer_cast<std::uint32_t*>(buf_) = bswap(tt);
+				buf_ += sizeof(std::uint32_t);
+			}
+
 			void operator()(const std::chrono::system_clock::time_point& tp) const {
 				*boost::asio::buffer_cast<std::chrono::system_clock::rep*>(buf_)
 					= bswap(tp.time_since_epoch().count());
@@ -274,6 +293,10 @@ namespace grape
 			constexpr void operator()(const T& i) const {
 				using htype = std::underlying_type_t<std::decay_t<T>>;
 				size += sizeof(htype);
+			}
+
+			constexpr void operator()(const std::chrono::year_month_day& ymd) const {
+				size += sizeof(std::uint32_t);
 			}
 
 			constexpr void operator()(const std::chrono::system_clock::time_point& tp) const {

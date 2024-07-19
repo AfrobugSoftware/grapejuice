@@ -211,6 +211,15 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, name)
 )
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), expired,
+	(boost::uuids::uuid, pharmacy_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, product_id)
+	(std::chrono::system_clock::time_point, expired_date)
+	(std::uint64_t, stock_count)
+)
+
 namespace grape {
 	class ProductManager : public boost::noncopyable {
 	public:
@@ -246,7 +255,10 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnAddPharmacyProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacyProductCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		
+
+
 		//formulary routes
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnRemoveFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
@@ -272,6 +284,10 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		//expired products
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkAsExpired(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetExpiredProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+		//invoices
 
 
 		//inter branch product management

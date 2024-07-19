@@ -282,6 +282,7 @@ namespace pof {
 						//signal the query on timeout ...
 						ec = boost::system::error_code(boost::asio::error::timed_out);
 						boost::mysql::throw_on_error(ec, base_t::m_diag);
+						break;
 					default:
 						break;
 					}
@@ -326,56 +327,59 @@ namespace pof {
 						else {
 							const auto& meta = result.meta();
 							auto& datameta = base_t::m_data->get_metadata();
-							datameta.reserve(meta.size());
-							for (const auto& m : meta) {
-								auto k = m.type();
-								switch (k)
-								{
-								case boost::mysql::column_type::bigint:
-									datameta.emplace_back(pof::base::data::kind::uint64);
-									break;
-								case boost::mysql::column_type::smallint:
-									datameta.emplace_back(pof::base::data::kind::uint32);
-									break;
-								case boost::mysql::column_type::text:
-									datameta.emplace_back(pof::base::data::kind::text);
-									break;
-								case boost::mysql::column_type::json:
-									datameta.emplace_back(pof::base::data::kind::text);
-									break;
-								case boost::mysql::column_type::double_:
-									datameta.emplace_back(pof::base::data::kind::float64);
-									break;
-								case boost::mysql::column_type::float_:
-									datameta.emplace_back(pof::base::data::kind::float32);
-									break;
-								case boost::mysql::column_type::date:
-								case boost::mysql::column_type::time:
-								case boost::mysql::column_type::timestamp:
-								case boost::mysql::column_type::datetime:
-									datameta.emplace_back(pof::base::data::kind::datetime);
-									break;
-								case boost::mysql::column_type::char_:
-									
-									break;
-								case boost::mysql::column_type::bit:
-								case boost::mysql::column_type::varbinary:
-								case boost::mysql::column_type::blob:
-									datameta.emplace_back(pof::base::data::kind::blob);
-									break;
-								case boost::mysql::column_type::int_:
-									datameta.push_back(pof::base::data::kind::int32);
-									break;
-								case boost::mysql::column_type::unknown:
-									datameta.push_back(pof::base::data::kind::null);
-									break;
-								default:
-									break;
+							if (datameta.empty()) {
+								datameta.reserve(meta.size());
+								for (const auto& m : meta) {
+									auto k = m.type();
+									switch (k)
+									{
+									case boost::mysql::column_type::bigint:
+										datameta.emplace_back(pof::base::data::kind::uint64);
+										break;
+									case boost::mysql::column_type::smallint:
+										datameta.emplace_back(pof::base::data::kind::uint32);
+										break;
+									case boost::mysql::column_type::text:
+										datameta.emplace_back(pof::base::data::kind::text);
+										break;
+									case boost::mysql::column_type::json:
+										datameta.emplace_back(pof::base::data::kind::text);
+										break;
+									case boost::mysql::column_type::double_:
+										datameta.emplace_back(pof::base::data::kind::float64);
+										break;
+									case boost::mysql::column_type::float_:
+										datameta.emplace_back(pof::base::data::kind::float32);
+										break;
+									case boost::mysql::column_type::date:
+									case boost::mysql::column_type::time:
+									case boost::mysql::column_type::timestamp:
+									case boost::mysql::column_type::datetime:
+										datameta.emplace_back(pof::base::data::kind::datetime);
+										break;
+									case boost::mysql::column_type::char_:
+
+										break;
+									case boost::mysql::column_type::bit:
+									case boost::mysql::column_type::varbinary:
+									case boost::mysql::column_type::blob:
+										datameta.emplace_back(pof::base::data::kind::blob);
+										break;
+									case boost::mysql::column_type::int_:
+										datameta.push_back(pof::base::data::kind::int32);
+										break;
+									case boost::mysql::column_type::unknown:
+										datameta.push_back(pof::base::data::kind::null);
+										break;
+									default:
+										break;
+									}
 								}
 							}
-							const auto& rows = result.rows();
 
-							base_t::m_data->reserve(rows.size());
+							const auto& rows = result.rows();
+							if(base_t::m_data->empty())
+								base_t::m_data->reserve(rows.size());
 							for (const auto& row : rows) {
 								//copy data
 								size_t i = 0;

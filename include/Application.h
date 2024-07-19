@@ -85,6 +85,9 @@ namespace grape {
 	template<typename T>
 		requires grape::FusionStruct<T>
 	using collection_type = boost::fusion::vector<std::vector<T>>;
+	using date_query_t = boost::fusion::vector<opt_fields, optional_field<std::chrono::year_month_day, 0>>;
+	using pid = grape::collection_type<boost::fusion::vector<boost::uuids::uuid>>;
+	using optional_list_t = boost::fusion::vector<opt_fields, optional_field<std::vector<boost::uuids::uuid>, 0>>;
 
 
 	using request = pof::base::net_manager::req_t;
