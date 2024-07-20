@@ -22,6 +22,7 @@ void grape::ProductManager::CreateTables()
 	CreateFormularyTable();
 	CreateOrderTable();
 	CreateWarningTable();
+	CreateBranchTransferPendingTable();
 }
 
 void grape::ProductManager::CreateProductTable()
@@ -329,6 +330,27 @@ void grape::ProductManager::CreateWarningTable()
 	}
 }
 
+void grape::ProductManager::CreateBranchTransferPendingTable(){
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE TABLE IF NOT EXISTS pending_transfer (
+				pharmacy_id binary(16),
+				from_branch_id binary(16),
+				to_branch_id binary(16),
+				product_list blob
+			))");
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		if (pushed)(void)fut.get();
+		else {
+			throw std::logic_error("Cannot get connection to database");
+		}
+	}
+	catch (std::exception exp) {
+		spdlog::error(exp.what());
+	}
+}
 
 std::pair<boost::uuids::uuid, boost::uuids::uuid> grape::ProductManager::SplitPidBid(boost::core::string_view str)
 {
@@ -372,6 +394,9 @@ void grape::ProductManager::SetRoutes()
 
 	app->route("/product/expired/mark", std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
 	app->route("/product/expired/get", std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
+
+	app->route("/product/branch/transfer", std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
+	app->route("/product/branch/getpendtransfers", std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -2055,8 +2080,8 @@ grape::ProductManager::OnMarkAsExpired(pof::base::net_manager::req_t&& req, boos
 			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
-		using pid = grape::collection_type<boost::fusion::vector<boost::uuids::uuid, std::uint64_t>>;
-		auto&& [pids, buf2] = grape::serial::read<pid>(buf);
+		using pid_s = grape::collection_type<boost::fusion::vector<boost::uuids::uuid, std::uint64_t>>;
+		auto&& [pids, buf2] = grape::serial::read<pid_s>(buf);
 		auto& v = boost::fusion::at_c<0>(pids);
 		if (v.empty()) throw std::invalid_argument("No products to mark");
 
@@ -2179,37 +2204,220 @@ grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 		//how to do this ?
-		using mark_t = boost::fusion::vector<std::uint64_t>;
+		using mark_t = boost::fusion::vector<std::uint32_t>;
 		using costupdate_t = boost::fusion::vector<pof::base::currency, pof::base::currency>;
 
 		auto&& [m, buf2] = grape::serial::read<mark_t>(buf);
-		std::uint64_t& percent = boost::fusion::at_c<0>(m);
-		
+		std::uint32_t& percent = boost::fusion::at_c<0>(m);
+		if (percent > 100) throw std::invalid_argument("Precent should be between 0 and  100");
+
+		const float multiplier = 1.0f + (static_cast<float>(percent) / 100.0f);
 		auto&& [opt, buf3] = grape::serial::read<grape::optional_list_t>(buf2);
 		auto& v = boost::fusion::at_c<1>(opt);
 		
 		//a list of product to update
+		//this list might be very large
+		//may need to page it+
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
 		if (v.has_value()) {
-			query->m_sql = R"(SELECT costprice, unitprice FROM pharma_products
+			query->m_sql = R"(SELECT product_id, costprice, unitprice FROM pharma_products
 			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;)";
+			query->m_arguments.reserve(v.value().size());
 			for (auto& i : v.value()) {
 				query->m_arguments.emplace_back(
 					std::vector<boost::mysql::field>{
 					boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 					boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
 					boost::mysql::field(boost::mysql::blob(i.begin(), i.end()))});
-
 			}
+			v.value().clear();
 		}
 		else {
-						
+			query->m_sql = R"(SELECT product_id, costprice, unitprice FROM pharma_products
+			WHERE pharmacy_id = ? AND branch_id = ?;)";
+			query->m_arguments = { {
+				boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+					boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+			} };
 		}
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		auto data = fut.get();
+		query->m_arguments.clear();
+
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No products in store"s);
+		}
+
+		query->m_sql = R"(UPDATE pharma_products SET unitprice = ? 
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?; )";
+		query->m_arguments.reserve(data->size());
+		for (auto& d : *data) {
+			auto& prodid = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
+			auto& costprice = boost::variant2::get<pof::base::currency>(d.first[1]);
+			auto& unitprice = boost::variant2::get<pof::base::currency>(d.first[2]);
+
+			unitprice = static_cast<double>(costprice) * multiplier;
+			query->m_arguments.emplace_back(
+			std::vector<boost::mysql::field>{
+			boost::mysql::field(boost::mysql::blob(unitprice.data().begin(), unitprice.data().end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(prodid.begin(), prodid.end()))});
+		}
+		data->clear();
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		fut = query->get_future();
+		tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		std::tie(ec) = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+		(void) fut.get();
+		
+		co_return app->OkResult("Marked up products");
 	}
 	catch (const std::exception& exp) {
-		
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 
+
+boost::asio::awaitable<pof::base::net_manager::res_t>
+grape::ProductManager::OnTransferProductsToBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put method needed");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		//read the crednetials for the branch to transfer to. 
+		auto&& [cred2, buf2] = grape::serial::read<grape::credentials>(buf);
+		if (!app->mAccountManager.IsUser(cred2.account_id, cred2.pharm_id)) {
+			co_return app->mNetManager.auth_error("branch is not authorised for transfer");
+		}
+
+		using pid_s = grape::collection_type<boost::fusion::vector<boost::uuids::uuid, std::uint64_t>>;
+		auto&& [pids, buf3] = grape::serial::read<pid_s>(buf2);
+		auto& v = boost::fusion::at_c<0>(pids);
+		if (v.empty()) co_return app->mNetManager.bad_request("No products to transfer");
+		//take out these stock from the from branch, remove from list if there are 0 stock
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT product_id, stock_count FROM pharma_products 
+			WHERE  (stock_count > ? OR stock_count = ? ) AND pharmacy_id = ? AND branch_id = ? AND product_id = ?;)");
+
+		// add list to the pending table awaiting approval
+		//need to put this in a pending stuff until approved by the pharmacy branch that accepts the transfer
+		query->m_arguments.reserve(v.size());
+		boost::unordered_flat_map<boost::uuids::uuid, std::uint64_t> productMap;
+		for (auto& i : v) {
+			auto& prodid = boost::fusion::at_c<0>(i);
+			auto& stock = boost::fusion::at_c<1>(i);
+			query->m_arguments.emplace_back(
+				std::vector<boost::mysql::field>{
+				boost::mysql::field(stock),
+				boost::mysql::field(stock),
+				boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+				boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+				boost::mysql::field(boost::mysql::blob(prodid.begin(), prodid.end()))});
+		}
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("Cannot transfer any product listed");
+		}
+		query->m_arguments.clear();
+		
+		for (auto& d : *data) {
+			auto& prodid = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
+			auto& stock = boost::variant2::get<std::uint64_t>(d.first[1]);
+			
+
+
+		}
+
+
+
+
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnApproveBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put method needed");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t>
+grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	co_return grape::response{};
+}
 
 

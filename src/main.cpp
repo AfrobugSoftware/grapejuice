@@ -89,8 +89,13 @@ int main(int argc, char** argv)
     });
 
 
-    boost::fusion::vector<std::chrono::year_month_day> ymp;
+    boost::fusion::vector<std::chrono::year_month_day, boost::unordered_flat_map<std::string, std::string>> ymp;
     boost::fusion::at_c<0>(ymp) = std::chrono::year_month_day(std::chrono::year(2024), std::chrono::month(11), std::chrono::day(30));
+    auto& map = boost::fusion::at_c<1>(ymp);
+    map.emplace("Zino", "Ferife");
+    map.emplace("Othuke", "Ferife");
+    map.emplace("Enife", "Ferife");
+
 
     const size_t size = grape::serial::get_size(ymp);
     grape::response::body_type::value_type value(size, 0x00);
@@ -105,10 +110,18 @@ int main(int argc, char** argv)
     }
     std::cout << std::endl;
 
-    auto&& [cred2, buf] = grape::serial::read<boost::fusion::vector<std::chrono::year_month_day>>(boost::asio::buffer(value));
+    auto&& [cred2, buf] = grape::serial::read<boost::fusion::vector<std::chrono::year_month_day,
+        boost::unordered_flat_map<std::string, std::string>>>(boost::asio::buffer(value));
 
     std::cout << "Reading: " << std::endl;
     std::cout << boost::fusion::at_c<0>(cred2) << std::endl;
+
+    auto& m = boost::fusion::at_c<1>(cred2);
+    for (auto& i : m) {
+        std::cout << "Key : " << i.first << std::endl;
+        std::cout << "Value : " << i.second << std::endl;
+
+    }
 
 
     app->Run();

@@ -6,6 +6,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/fusion/include/define_struct.hpp>
 #include "serialiser.h"
 
@@ -240,6 +241,7 @@ namespace grape {
 		void CreateFormularyContentTable();
 		void CreateOrderTable();
 		void CreateWarningTable();
+		void CreateBranchTransferPendingTable();
 
 		//utilities
 		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
@@ -291,6 +293,11 @@ namespace grape {
 
 
 		//inter branch product management
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnTransferProductsToBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranchPendTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnApproveBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+
+
 
 		// mysql procedures
 		void Procedures();

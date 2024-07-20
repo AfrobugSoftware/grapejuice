@@ -7,6 +7,8 @@
 #include <boost/fusion/include/transformation.hpp>
 #include <boost/mpl/range_c.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <boost/unordered/unordered_flat_map.hpp>
+
 
 #include "Data.h"
 #include "currency.h"
@@ -37,6 +39,12 @@ namespace grape
 		std::ranges::reverse(value_representation);
 		return std::bit_cast<T>(value_representation);
 	}
+
+	template<typename T>
+	concept Hashable = requires(T a)
+	{
+		{ boost::hash<T>{}(a) } -> std::convertible_to<std::size_t>;
+	};
 
 	template<typename T, size_t N = CHAR_BIT * sizeof(T)>
 	struct optional_field_set {
@@ -85,6 +93,19 @@ namespace grape
 				typename std::underlying_type<E>::type v;
 				(*this)(v);
 				e = static_cast<E>(v);
+			}
+
+			template<Hashable K, typename T>
+			void operator()(boost::unordered_flat_map<K, T>& map) const {
+				std::uint32_t len = 0;
+				(*this)(len);
+				for (; len; len--){
+					K key{};
+					(*this)(key);
+					T val{};
+					(*this)(val);
+					map.emplace(key, val);
+				}
 			}
 
 			void operator()(std::chrono::year_month_day& ymd) const {
@@ -265,16 +286,25 @@ namespace grape
 			{
 				if constexpr (std::is_integral_v<T>) {
 					if (vec.size() > buf_.size()) throw std::logic_error("Cannot fit content in buffer");
-					(*this)(vec.size());
+					(*this)(static_cast<std::uint32_t>(vec.size()));
 
 					std::copy(vec.begin(), vec.end(), reinterpret_cast<T*>(buf_.data()));
-					buf_ += vec.size();
+					buf_ += (vec.size() * sizeof(T));
 				}
 				else {
-					(*this)(vec.size());
+					(*this)(static_cast<std::uint32_t>(vec.size()));
 					for (const auto& v : vec) {
 						(*this)(v);
 					}
+				}
+			}
+
+			template<Hashable H, typename T>
+			void operator()(const boost::unordered_flat_map<H, T>& map) const {
+				(*this)(static_cast<std::uint32_t>(map.size()));
+				for (auto& i : map) {
+					(*this)(i.first);
+					(*this)(i.second);
 				}
 			}
 		
@@ -361,6 +391,15 @@ namespace grape
 				else if constexpr (std::disjunction_v<std::is_integral<T>, std::is_floating_point<T>,
 				 std::is_enum<T>, std::is_pod<T>, std::is_array<T>>) {
 					size += vec.size() * sizeof(T);
+				}
+			}
+
+			template<Hashable H, typename T>
+			void operator()(const boost::unordered_flat_map<H, T>& map) const {
+				size += sizeof(std::uint32_t);
+				for (auto& i : map) {
+					(*this)(i.first);
+					(*this)(i.second);
 				}
 			}
 		};
