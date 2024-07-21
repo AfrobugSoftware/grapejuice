@@ -54,6 +54,14 @@ namespace pof {
 				m_data = std::make_shared<pof::base::data>();
 			}
 
+
+			void unborrow() {
+				if (m_connection) {
+					m_manager->unborrow(m_connection);
+					m_connection.reset();
+				}
+			}
+
 			virtual ~query() {}
 
 			std::future<std::shared_ptr<pof::base::data>> get_future(){
@@ -263,7 +271,7 @@ namespace pof {
 			boost::asio::awaitable<boost::system::error_code> close() {
 				boost::system::error_code ec;
 				if (stmt.valid()) {
-					ec = co_await base_t::m_connection->async_close_statement(stmt, boost::asio::use_awaitable);
+					std::tie(ec) =  co_await base_t::m_connection->async_close_statement(stmt, base_t::tuple_awaitable);
 				}
 				co_return ec;
 			}
@@ -271,6 +279,7 @@ namespace pof {
 			virtual ~querystmt() {
 				if(stmt.valid()) base_t::m_connection->close_statement(stmt); //blocks might be a bottle neck
 			}
+
 			virtual boost::asio::awaitable<void> operator()() override {
 				auto this_ = base_t::shared_t::shared_from_this(); //hold till we leave the coroutine
 

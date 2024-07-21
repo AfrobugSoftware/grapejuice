@@ -67,16 +67,22 @@ bool pof::base::databasemysql::connect()
 bool pof::base::databasemysql::push(std::shared_ptr<pof::base::query<databasemysql>> query)
 {
 	try {
-		auto sp = borrow(); //get a connection
-		if (sp) {
-			query->m_connection = sp;
-			boost::asio::co_spawn(sp->get_executor(), runquery(query), boost::asio::detached);
-		} else {
-			//no connection
-			//caancel the timer
-			if (query->m_waittime.has_value()) query->m_waittime->cancel();
-			spdlog::error("No connection avaliable");
-			return false;
+		if (query->m_hold_connection && query->m_connection){
+			boost::asio::co_spawn(query->m_connection->get_executor(), runquery(query), boost::asio::detached);
+		}
+		else {
+			auto sp = borrow(); //get a connection
+			if (sp) {
+				query->m_connection = sp;
+				boost::asio::co_spawn(sp->get_executor(), runquery(query), boost::asio::detached);
+			}
+			else {
+				//no connection
+				//caancel the timer
+				if (query->m_waittime.has_value()) query->m_waittime->cancel();
+				spdlog::error("No connection avaliable");
+				return false;
+			}
 		}
 	}
 	catch (const std::system_error& err) {

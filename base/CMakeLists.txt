@@ -16,6 +16,11 @@ else()
 	set(BASE_LIB_DIR ${CMAKE_BINARY_DIR}/base/Release)
 endif()
 
+if(CMAKE_SYSTEM MATCHES Linux)
+	target_compile_options(base PUBLIC -fpremissive -fcoroutines)
+elseif(CMAKE_SYSTEM MATCHES Windows)
+	target_compile_options(base PUBLIC /bigobj /Zc:__cplusplus /JMC-)
+endif()
 
 target_link_directories(base PUBLIC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 message(STATUS ${BASE_LIB_DIR})

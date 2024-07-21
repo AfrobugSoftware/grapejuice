@@ -1,6 +1,16 @@
 #include "ProductManager.h"
 #include "Application.h"
 
+bool grape::operator==(const product& a, const product& b) {
+	return a.id == b.id;
+}
+
+std::size_t grape::hash_value(product const& b) {
+	boost::hash<boost::uuids::uuid> hasher;
+	return hasher(b.id);
+}
+
+
 grape::ProductManager::ProductManager()
 {
 }
@@ -2114,6 +2124,7 @@ grape::ProductManager::OnMarkAsExpired(pof::base::net_manager::req_t&& req, boos
 		}
 		auto&& [ec] = co_await query->m_waittime->async_wait();
 		if (ec != boost::asio::error::operation_aborted) {
+			//cancel the operation from the database
 			co_return app->mNetManager.timeout_error();
 		}
 		(void)fut.get();
@@ -2220,6 +2231,7 @@ grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req
 		//this list might be very large
 		//may need to page it+
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_hold_connection = true;
 		if (v.has_value()) {
 			query->m_sql = R"(SELECT product_id, costprice, unitprice FROM pharma_products
 			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;)";
@@ -2298,6 +2310,7 @@ grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req
 		if (ec != boost::asio::error::operation_aborted) {
 			co_return app->mNetManager.timeout_error();
 		}
+		query->unborrow(); //return the connection we are holding
 		(void) fut.get();
 		
 		co_return app->OkResult("Marked up products");
@@ -2341,6 +2354,7 @@ grape::ProductManager::OnTransferProductsToBranch(pof::base::net_manager::req_t&
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT product_id, stock_count FROM pharma_products 
 			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;)");
+		query->m_hold_connection = true;
 
 		// add list to the pending table awaiting approval
 		//need to put this in a pending stuff until approved by the pharmacy branch that accepts the transfer
@@ -2453,7 +2467,7 @@ grape::ProductManager::OnTransferProductsToBranch(pof::base::net_manager::req_t&
 		}
 		(void)fut.get();
 
-
+		query->unborrow();
 		co_return app->OkResult("Transfer request pending");
 	}
 	catch (const std::exception& exp) {
@@ -2505,6 +2519,7 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT * FROM pending_transfers 
 			WHERE pharmacy_id = ? AND to_branch_id = ?;)");
+		query->m_hold_connection = true;
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
@@ -2533,7 +2548,7 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 		if (!data || data->empty()) {
 			co_return app->mNetManager.not_found("No pending transfers"s);
 		}
-		
+		//the transfer from branch
 		using pend_t = boost::fusion::vector<grape::branch, boost::unordered_flat_map<grape::product, std::uint64_t>>;
 		grape::collection_type<pend_t> pendings;
 		auto& v = boost::fusion::at_c<0>(pendings);
@@ -2554,17 +2569,20 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 				p.manufactures_name
 				FROM products p
 				WHERE p.id =  ?;)";
-		query->m_hold_connection = true;
 
 		auto bquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT * FROM branches WHERE branch_id = ?;)");
 		bquery->m_hold_connection = true;
 
-		//get the products
+		
+		//for each pending list for this branch, get the products and the from branch
 		for (auto& d : *data) {
-			//for each pending for this branch, get the products and the from branch
-			auto& pendlist = boost::variant2::get<pof::base::data::blob_t>(d.first[4]);
+
+			query->m_arguments.clear();
+			bquery->m_arguments.clear();
+
 			auto& frombranch = boost::variant2::get<pof::base::data::duuid_t>(d.first[2]);
+			auto& pendlist = boost::variant2::get<pof::base::data::blob_t>(d.first[4]);
 
 			auto&& [map, b] = grape::serial::read<pid_s>(boost::asio::buffer(pendlist));
 			auto& m = boost::fusion::at_c<0>(map);
@@ -2610,21 +2628,38 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 				co_return app->mNetManager.timeout_error();
 			}
 
-
-
-
+			auto br = fut.get();
+			if (!br || br->empty()) continue;
+			auto& brow = *(br->begin());
 
 
 			pend_t p;
+			auto& pbranch = boost::fusion::at_c<0>(p);
 			auto& pmap = boost::fusion::at_c<1>(p);
-			pmap.try_emplace()
+			pbranch = grape::serial::build<grape::branch>(brow.first);
+			for (auto& prod : *pd) {
+				auto pp = grape::serial::build<grape::product>(prod.first);
+				auto f = m.find(pp.id);
+				if (f == m.end()) continue;
 
-
+				pmap.try_emplace(pp, f->second);
+			}
+			v.emplace_back(std::move(p));
 		}
 
 		ec = co_await query->close();
 		if (ec) throw std::system_error(ec);
+		query->unborrow();
 
+		ec = co_await bquery->close();
+		if (ec) throw std::system_error(ec);
+		bquery->unborrow();
+
+		ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+
+
+		co_return app->OkResult(pendings);
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
