@@ -223,7 +223,10 @@ BOOST_FUSION_DEFINE_STRUCT(
 
 namespace grape {
 	using pid_s = boost::fusion::vector<boost::unordered_flat_map<boost::uuids::uuid, std::uint64_t>>;
-	
+	using pend_t = boost::fusion::vector<std::uint64_t, grape::branch, boost::unordered_flat_map<grape::product, std::uint64_t>>;
+
+
+
 	//allow product to be hashable
 	extern bool operator==(const product& a, const product& b);
 	extern std::size_t hash_value(product const& b);
@@ -301,6 +304,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnTransferProductsToBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranchPendTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnApproveBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnRejectBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 
 

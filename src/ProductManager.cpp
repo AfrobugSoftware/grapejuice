@@ -2282,7 +2282,7 @@ grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req
 			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?; )";
 		query->m_arguments.reserve(data->size());
 		for (auto& d : *data) {
-			auto& prodid = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
+			auto& prodid    = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
 			auto& costprice = boost::variant2::get<pof::base::currency>(d.first[1]);
 			auto& unitprice = boost::variant2::get<pof::base::currency>(d.first[2]);
 
@@ -2296,7 +2296,6 @@ grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req
 		}
 		data->clear();
 
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(60s);
 		fut = query->get_future();
 		tried = app->mDatabase->push(query);
@@ -2417,7 +2416,6 @@ grape::ProductManager::OnTransferProductsToBranch(pof::base::net_manager::req_t&
 		}
 		data->clear();
 
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(60s);
 		fut = query->get_future();
 		tried = app->mDatabase->push(query);
@@ -2451,7 +2449,6 @@ grape::ProductManager::OnTransferProductsToBranch(pof::base::net_manager::req_t&
 				boost::mysql::field(boost::mysql::blob(listlblock.begin(), listlblock.end()))
 		} };
 
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(60s);
 		fut = query->get_future();
 		tried = app->mDatabase->push(query);
@@ -2492,7 +2489,87 @@ grape::ProductManager::OnApproveBranchTransfers(pof::base::net_manager::req_t&& 
 			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
+		//the transfer from branch
+		auto&&[pendings, buf2] = grape::serial::read<grape::collection_type<pend_t>>(buf);
+		
+		//v an array for the approved transfers
+		auto& v = boost::fusion::at_c<0>(pendings);
+		if (v.empty()) throw std::invalid_argument("No pending list");
+		
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE pharma_products SET stock_count = stock_count + ? 
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;)");
+		query->m_hold_connection = true;
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		
+		//all the ids are approved
+		auto pendel = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM pending_transfers WHERE pend_id = ?;)");
+		pendel->m_hold_connection = true;
+		pendel->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 
+		for (auto& approv : v) {
+			auto& id     = boost::fusion::at_c<0>(approv);
+			auto& branch = boost::fusion::at_c<1>(approv);
+			auto& map    = boost::fusion::at_c<2>(approv);
+
+			query->m_arguments.clear();
+			query->m_arguments.reserve(map.size());
+
+			for (auto& i : map) {
+				query->m_arguments.emplace_back(
+					std::vector<boost::mysql::field>{
+						boost::mysql::field(i.second),
+						boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+						boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+						boost::mysql::field(boost::mysql::blob(i.first.id.begin(), i.first.id.end()))
+				});
+			}
+
+			query->m_waittime->expires_after(60s);
+			auto fut = query->get_future();
+			bool tried = app->mDatabase->push(query);
+			if (!tried) {
+				tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+				if (!tried) {
+					co_return app->mNetManager.server_error("Error in query");
+				}
+			}
+			auto&& [ec] = co_await query->m_waittime->async_wait();
+			if (ec != boost::asio::error::operation_aborted) {
+				co_return app->mNetManager.timeout_error();
+			}
+			(void)fut.get();
+
+			pendel->m_arguments = { {
+				boost::mysql::field(id)
+			} };
+			pendel->m_waittime->expires_after(60s);
+			fut = std::move(pendel->get_future());
+			tried = app->mDatabase->push(pendel);
+			if (!tried) {
+				tried = co_await app->mDatabase->retry(pendel); //try to push into the queue multiple times
+				if (!tried) {
+					co_return app->mNetManager.server_error("Error in query");
+				}
+			}
+			auto&& [ec2] = co_await pendel->m_waittime->async_wait();
+			if (ec2 != boost::asio::error::operation_aborted) {
+				co_return app->mNetManager.timeout_error();
+			}
+			(void)fut.get();
+		}
+
+		boost::system::error_code ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+		query->unborrow();
+
+		ec = co_await pendel->close();
+		if (ec) throw std::system_error(ec);
+		pendel->unborrow();
+
+		
+		co_return app->OkResult("Updated stock with transfer");
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
@@ -2549,7 +2626,6 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 			co_return app->mNetManager.not_found("No pending transfers"s);
 		}
 		//the transfer from branch
-		using pend_t = boost::fusion::vector<grape::branch, boost::unordered_flat_map<grape::product, std::uint64_t>>;
 		grape::collection_type<pend_t> pendings;
 		auto& v = boost::fusion::at_c<0>(pendings);
 		v.reserve(data->size());
@@ -2573,6 +2649,7 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 		auto bquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT * FROM branches WHERE branch_id = ?;)");
 		bquery->m_hold_connection = true;
+		bquery->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 
 		
 		//for each pending list for this branch, get the products and the from branch
@@ -2592,7 +2669,6 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 					boost::mysql::field(boost::mysql::blob(i.first.begin(), i.first.end()))
 				});
 			}
-			query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 			query->m_waittime->expires_after(60s);
 			fut = std::move(query->get_future());
 			tried = app->mDatabase->push(query);
@@ -2613,7 +2689,6 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 			bquery->m_arguments = { {
 				boost::mysql::field(boost::mysql::blob(frombranch.begin(), frombranch.end()))
 			} };
-			bquery->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 			bquery->m_waittime->expires_after(60s);
 			fut = std::move(bquery->get_future());
 			tried = app->mDatabase->push(bquery);
@@ -2634,9 +2709,13 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 
 
 			pend_t p;
-			auto& pbranch = boost::fusion::at_c<0>(p);
-			auto& pmap = boost::fusion::at_c<1>(p);
-			pbranch = grape::serial::build<grape::branch>(brow.first);
+			auto& pendid   = boost::fusion::at_c<0>(p);
+			auto& pbranch  = boost::fusion::at_c<1>(p);
+			auto& pmap     = boost::fusion::at_c<2>(p);
+			
+			pendid         = boost::variant2::get<std::uint64_t>(d.first[0]);
+			pbranch        = grape::serial::build<grape::branch>(brow.first);
+
 			for (auto& prod : *pd) {
 				auto pp = grape::serial::build<grape::product>(prod.first);
 				auto f = m.find(pp.id);
@@ -2654,9 +2733,6 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 		ec = co_await bquery->close();
 		if (ec) throw std::system_error(ec);
 		bquery->unborrow();
-
-		ec = co_await query->close();
-		if (ec) throw std::system_error(ec);
 
 
 		co_return app->OkResult(pendings);
