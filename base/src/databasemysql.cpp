@@ -125,7 +125,11 @@ boost::asio::awaitable<void> pof::base::databasemysql::runquery(std::shared_ptr<
 		try {
 			//execute the query
 			co_await(*query)();
-			unborrow(query->m_connection);
+			if (!query->m_hold_connection)
+			{
+				unborrow(query->m_connection);
+				query->m_connection.reset();
+			}
 		}
 		catch (...) {
 			std::rethrow_exception(std::current_exception());

@@ -222,6 +222,18 @@ BOOST_FUSION_DEFINE_STRUCT(
 )
 
 namespace grape {
+	using pid_s = boost::fusion::vector<boost::unordered_flat_map<boost::uuids::uuid, std::uint64_t>>;
+	
+	//allow product to be hashable
+	constexpr bool operator==(const product& a, const product& b) {
+		return a.id == b.id;
+	}
+
+	std::size_t hash_value(product const& b) {
+		boost::hash<boost::uuids::uuid> hasher;
+		return hasher(b.id);
+	}
+
 	class ProductManager : public boost::noncopyable {
 	public:
 		ProductManager();
@@ -238,7 +250,6 @@ namespace grape {
 		void CreateExpiredTable();
 		void CreatePharmacyProductTable();
 		void CreateFormularyTable();
-		void CreateFormularyContentTable();
 		void CreateOrderTable();
 		void CreateWarningTable();
 		void CreateBranchTransferPendingTable();

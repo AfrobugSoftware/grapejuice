@@ -47,6 +47,8 @@ namespace pof {
 
 			manager::conn_ptr m_connection;
 			std::optional<timer_t> m_waittime;
+			bool m_hold_connection = false;
+
 
 			query(std::shared_ptr<manager> man = nullptr, const std::string& sql = ""s) : m_manager(man), m_sql(sql) {
 				m_data = std::make_shared<pof::base::data>();
@@ -257,6 +259,15 @@ namespace pof {
 			querystmt(std::shared_ptr<manager> manager, const std::string& sql) : base_t(manager){
 				base_t::m_sql = sql;
 			}
+
+			boost::asio::awaitable<boost::system::error_code> close() {
+				boost::system::error_code ec;
+				if (stmt.valid()) {
+					ec = co_await base_t::m_connection->async_close_statement(stmt, boost::asio::use_awaitable);
+				}
+				co_return ec;
+			}
+
 			virtual ~querystmt() {
 				if(stmt.valid()) base_t::m_connection->close_statement(stmt); //blocks might be a bottle neck
 			}
@@ -269,22 +280,24 @@ namespace pof {
 					typename base_t::timer_t timer(co_await boost::asio::this_coro::executor);
 					timer.expires_after(std::chrono::minutes(1));
 
-					auto complete = co_await(conn->async_prepare_statement(base_t::m_sql, base_t::m_diag, base_t::tuple_awaitable) || timer.async_wait());
-					switch (complete.index())
-					{
-					case 0:
-						timer.cancel();
-						ec = std::get<0>(std::get<0>(complete));
-						stmt = std::get<1>(std::get<0>(complete));
-						break;
-					case 1:
-						//what happens if we timeout ?
-						//signal the query on timeout ...
-						ec = boost::system::error_code(boost::asio::error::timed_out);
-						boost::mysql::throw_on_error(ec, base_t::m_diag);
-						break;
-					default:
-						break;
+					if (!stmt.valid()) {
+						auto complete = co_await(conn->async_prepare_statement(base_t::m_sql, base_t::m_diag, base_t::tuple_awaitable) || timer.async_wait());
+						switch (complete.index())
+						{
+						case 0:
+							timer.cancel();
+							ec = std::get<0>(std::get<0>(complete));
+							stmt = std::get<1>(std::get<0>(complete));
+							break;
+						case 1:
+							//what happens if we timeout ?
+							//signal the query on timeout ...
+							ec = boost::system::error_code(boost::asio::error::timed_out);
+							boost::mysql::throw_on_error(ec, base_t::m_diag);
+							break;
+						default:
+							break;
+						}
 					}
 
 					boost::mysql::throw_on_error(ec, base_t::m_diag);
