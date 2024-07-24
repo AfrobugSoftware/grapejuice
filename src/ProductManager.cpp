@@ -2742,4 +2742,109 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 	}
 }
 
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnRejectBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put method needed");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		//put it back
+			//read the rejected transfers
+		auto&& [pendings, buf2] = grape::serial::read<grape::collection_type<pend_t>>(buf);
+
+		//v an array for the approved transfers
+		auto& v = boost::fusion::at_c<0>(pendings);
+		if (v.empty()) throw std::invalid_argument("No pending list");
+
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE pharma_products SET stock_count = stock_count + ? 
+				WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;)");
+		query->m_hold_connection = true;
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+
+		auto rquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM pending_transfers WHERE pend_id = ?;)");
+		rquery->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		
+		for (auto& i : v) {
+			auto& id = boost::fusion::at_c<0>(i);
+			auto& branch = boost::fusion::at_c<1>(i); //from branch
+			auto& map = boost::fusion::at_c<2>(i);
+			query->m_arguments.clear();
+
+			for (auto& m : map) {
+				query->m_arguments.emplace_back(std::vector<boost::mysql::field>{
+						boost::mysql::field(m.second),
+						boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+						boost::mysql::field(boost::mysql::blob(branch.id.begin(), branch.id.end())),
+						boost::mysql::field(boost::mysql::blob(m.first.id.begin(), m.first.id.end()))
+				});
+			}
+
+			bool tried = app->mDatabase->push(query);
+			if (!tried) {
+				tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+				if (!tried) {
+					co_return app->mNetManager.server_error("Error in query");
+				}
+			}
+			auto&& [ec] = co_await query->m_waittime->async_wait();
+			if (ec != boost::asio::error::operation_aborted) {
+				co_return app->mNetManager.timeout_error();
+			}
+			auto fut = query->get_future();
+			(void)fut.get();
+
+
+			rquery->m_arguments = { {
+				boost::mysql::field(id)
+			} };
+
+			tried = app->mDatabase->push(rquery);
+			if (!tried) {
+				tried = co_await app->mDatabase->retry(rquery); //try to push into the queue multiple times
+				if (!tried) {
+					co_return app->mNetManager.server_error("Error in query");
+				}
+			}
+			std::tie(ec) = co_await rquery->m_waittime->async_wait();
+			if (ec != boost::asio::error::operation_aborted) {
+				co_return app->mNetManager.timeout_error();
+			}
+
+			fut = std::move(rquery->get_future());
+			(void)fut.get();
+		}
+
+
+		auto ec = co_await rquery->close();
+		if (ec) throw std::system_error(ec);
+		rquery->unborrow();
+		
+		ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+		query->unborrow();
+
+
+		//write to the audit log
+		co_return app->OkResult("Rejected transfers returned");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
