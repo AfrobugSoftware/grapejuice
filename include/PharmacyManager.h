@@ -30,6 +30,16 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, info)
 )
 
+namespace grape {
+	enum class branch_type : std::uint32_t {
+		community,
+		hospital,
+		industry,
+		drf,
+		educational
+	};
+};
+
 //branches
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), branch,
@@ -37,6 +47,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, address_id)
 	(std::string, name)
+	(grape::branch_type, type)
 	(std::uint32_t, state)
 	(std::string, info)
 )

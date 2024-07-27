@@ -111,7 +111,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		args = {
 				boost::mysql::field(boost::mysql::blob(account.id.begin(), account.id.end())),
 				boost::mysql::field(boost::mysql::blob(account.account_id.begin(), account.account_id.end())),
-				boost::mysql::field(account.type),
+				boost::mysql::field(static_cast<std::underlying_type_t<grape::account_type>>(account.type)),
 				boost::mysql::field(account.privilage),
 				boost::mysql::field(account.first_name),
 				boost::mysql::field(account.last_name),

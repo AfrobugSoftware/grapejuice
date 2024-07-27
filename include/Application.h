@@ -121,12 +121,12 @@ namespace grape {
 		std::string ExtractString(pof::base::net_manager::req_t& req);
 
 		grape::response OkResult(const std::string& message, const std::string& status = "Successful"s,
-			 bool keep_alive = true);
+			 bool keep_alive = true, http::status stat = http::status::ok);
 
 		template<typename T>
 			requires grape::FusionStruct<T>
-		grape::response OkResult(const T& data, bool keep_alive = true) {
-			grape::response res{ http::status::ok, 11 };
+		grape::response OkResult(const T& data, bool keep_alive = true, http::status stat = http::status::ok) {
+			grape::response res{ stat, 11 };
 			res.set(http::field::server, USER_AGENT_STRING);
 			res.set(http::field::content_type, "application/octlet-stream");
 			res.keep_alive(keep_alive);

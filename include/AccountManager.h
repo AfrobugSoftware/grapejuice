@@ -17,6 +17,17 @@ namespace grape {
 	using opt_secans = grape::optional_field<std::string, 2>;
 	using opt_sessionid = grape::optional_field<boost::uuids::uuid, 3>;
 	using opt_session_start_time = grape::optional_field<std::chrono::system_clock::time_point, 4>;
+
+
+	enum class account_type : std::uint32_t {
+		pharmacist,
+		loccum_pharmacist,
+		intern_pharmacist,
+		pharmacy_tech,
+		student_pharmacist,
+		dispenser,
+		sale_assistant
+	};
 };
 
 //accounts
@@ -24,7 +35,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(grape), account,
 	(boost::uuids::uuid, id)
 	(boost::uuids::uuid, account_id)
-	(std::uint32_t, type)
+	(grape::account_type, type)
 	(std::uint32_t, privilage)
 	(std::string, first_name)
 	(std::string, last_name)

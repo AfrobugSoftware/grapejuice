@@ -187,7 +187,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		pharmacy.address_id = address.id;
 
-		co_return app->OkResult(pharmacy);
+		co_return app->OkResult(pharmacy, req.keep_alive(), http::status::created);
 
 	}
 	catch (const std::logic_error& jerr) {

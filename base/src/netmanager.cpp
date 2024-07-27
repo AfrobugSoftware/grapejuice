@@ -2,10 +2,7 @@
 
 pof::base::net_manager::net_manager()
 	: m_ssl{boost::asio::ssl::context_base::sslv23_server}{
-	//auto ec = setupssl();
-	//if (ec) {
-	//	
-	//}
+	auto ec = setupssl();
 	
 	m_workgaurd = std::make_unique<net::executor_work_guard<net::io_context::executor_type>>(m_io.get_executor());
 	m_threadvec.reserve(std::thread::hardware_concurrency());
@@ -31,17 +28,8 @@ std::error_code pof::base::net_manager::setupssl()
 	//this would change
 	try {
 		boost::system::error_code ec;
+		m_ssl.set_verify_mode(net::ssl::verify_none);
 
-
-		m_ssl.set_default_verify_paths();
-		m_ssl.set_verify_mode(net::ssl::verify_peer);
-
-		//when I get a certificate
-		m_ssl.use_certificate_file(fp.string(), boost::asio::ssl::context::pem);
-		m_ssl.use_rsa_private_key_file(fp.string(), boost::asio::ssl::context::pem);
-		m_ssl.set_password_callback([](std::size_t len, boost::asio::ssl::context_base::password_purpose pp) -> std::string {
-			return "zino";
-			}, ec);
 		return ec;
 	}
 	catch (const std::system_error& err) {
@@ -193,7 +181,7 @@ pof::base::net_manager::res_t pof::base::net_manager::timeout_error() const
 
 void pof::base::net_manager::run()
 {
-	boost::make_shared<listener>(*this, m_io, m_endpoint)->run();
+	boost::make_shared<listener>(*this, m_endpoint)->run();
 	m_signals = std::make_shared<net::signal_set>(m_io, SIGINT, SIGTERM);
 	m_signals->async_wait(
 		[&](boost::system::error_code const&, int)
@@ -229,13 +217,12 @@ void pof::base::net_manager::listener::on_accept(beast::error_code ec, tcp::sock
 
 	//schelde another accept
 	 // The new connection gets its own strand
-	acceptor_.async_accept(net::make_strand(ioc_),
+	acceptor_.async_accept(net::make_strand(manager.io()),
 		beast::bind_front_handler(&listener::on_accept, shared_from_this()));
 }
 
-pof::base::net_manager::listener::listener(net_manager& man,net::io_context& ioc, tcp::endpoint endpoint)
-: manager(man), ioc_(ioc)
-, acceptor_(ioc){
+pof::base::net_manager::listener::listener(net_manager& man, tcp::endpoint endpoint)
+: manager(man), acceptor_(man.io()){
 	beast::error_code ec;
 
 	// Open the acceptor
@@ -267,7 +254,7 @@ pof::base::net_manager::listener::listener(net_manager& man,net::io_context& ioc
 void pof::base::net_manager::listener::run()
 {
 	// The new connection gets its own strand
-	acceptor_.async_accept( net::make_strand(ioc_), 
+	acceptor_.async_accept( net::make_strand(manager.io()), 
 		beast::bind_front_handler(&listener::on_accept,
 			shared_from_this()));
 }
@@ -284,7 +271,7 @@ void pof::base::net_manager::httpsession::do_read()
 {
 	parser.emplace();
 	parser->body_limit(10000);
-	stream_.expires_after(std::chrono::seconds(60));
+	boost::beast::get_lowest_layer(stream_).expires_after(std::chrono::seconds(60));
 
 	// Read a request
 	http::async_read(
@@ -300,7 +287,7 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 {
 	// This means they closed the connection
 	if (ec == http::error::end_of_stream){
-		stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+		boost::beast::get_lowest_layer(stream_).socket().shutdown(tcp::socket::shutdown_both, ec);
 		return;
 	}
 	// Handle the error, if any
@@ -324,7 +311,7 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 			});
 		return;
 	}
-	stream_.expires_after(std::chrono::seconds(60));
+	boost::beast::get_lowest_layer(stream_).expires_after(std::chrono::seconds(30));
 
 	boost::urls::matches m;
 	auto found = manager.m_router.find(rpath.value(), m);
@@ -376,7 +363,7 @@ void pof::base::net_manager::httpsession::on_write(beast::error_code ec, std::si
 	{
 		// This means we should close the connection, usually because
 		// the response indicated the "Connection: close" semantic.
-		stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+		boost::beast::get_lowest_layer(stream_).socket().shutdown(tcp::socket::shutdown_send, ec);
 		return;
 	}
 
@@ -385,11 +372,30 @@ void pof::base::net_manager::httpsession::on_write(beast::error_code ec, std::si
 }
 
 pof::base::net_manager::httpsession::httpsession(net_manager& man, tcp::socket&& socket)
-: manager(man), stream_(std::move(socket)){
+	: manager(man), stream_(std::move(socket), man.ssl()) {
 
+}
+
+void pof::base::net_manager::httpsession::on_handshake(beast::error_code ec)
+{
+	if (ec) {
+		fail(ec, "handshake");
+		return;
+	}
+	do_read(); //begin the reading
 }
 
 void pof::base::net_manager::httpsession::run()
 {
-	do_read(); //begin the reading
+	// Set the timeout.
+	beast::get_lowest_layer(stream_).expires_after(
+		std::chrono::seconds(30));
+
+
+	// Perform the SSL handshake
+	stream_.async_handshake(
+		boost::asio::ssl::stream_base::server,
+		beast::bind_front_handler(
+			&httpsession::on_handshake,
+			this->shared_from_this()));
 }

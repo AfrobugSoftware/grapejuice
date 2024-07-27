@@ -28,13 +28,15 @@ namespace pof
 			class httpsession : public boost::enable_shared_from_this<httpsession>
 			{
 				net_manager& manager;
-				beast::tcp_stream stream_;
+				beast::ssl_stream<beast::tcp_stream> stream_;
 				beast::flat_buffer buffer_;
 
 				boost::optional<http::request_parser<http::vector_body<std::uint8_t>>> parser;
 
 				void fail(beast::error_code ec, char const* what);
 				void do_read();
+
+				void on_handshake(beast::error_code ec);
 				void on_read(beast::error_code ec, std::size_t);
 				void on_write(beast::error_code ec, std::size_t, bool close);
 			public:
@@ -46,7 +48,6 @@ namespace pof
 			class listener : public boost::enable_shared_from_this<listener>
 			{
 				net_manager& manager;
-				net::io_context& ioc_;
 				tcp::acceptor acceptor_;
 				//boost::shared_ptr<shared_state> state_;
 
@@ -54,7 +55,7 @@ namespace pof
 				void on_accept(beast::error_code ec, tcp::socket socket);
 
 			public:
-				listener(net_manager& man, net::io_context& ioc, tcp::endpoint endpoint);
+				listener(net_manager& man, tcp::endpoint endpoint);
 				void run();
 			};
 
@@ -65,8 +66,8 @@ namespace pof
 			bool stop();
 			std::error_code setupssl();
 
-			inline net::io_context& io() { return m_io; }
-			inline net::ssl::context& ssl() { return m_ssl; }
+			constexpr inline net::io_context& io() { return m_io; }
+			constexpr inline net::ssl::context& ssl() { return m_ssl; }
 
 
 			res_t bad_request(const std::string& err) const;

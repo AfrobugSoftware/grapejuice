@@ -125,9 +125,9 @@ std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req
 }
 
 grape::response grape::Application::OkResult(const std::string& message, 
-		const std::string& status, bool keep_alive)
+		const std::string& status, bool keep_alive, http::status stat)
 {
-	grape::response res{ http::status::ok, 11 };
+	grape::response res{ stat, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
 	res.set(http::field::content_type, "application/octlet-stream");
 	res.keep_alive(keep_alive);
@@ -155,6 +155,10 @@ void grape::Application::SetRoutes()
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onAppPing(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	try {
+		if (req.method() != http::verb::put) {
+			co_return app->mNetManager.bad_request("Put request expected");
+		}
+
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
 		}
@@ -261,7 +265,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onAppC
 			boost::lexical_cast<size_t>(app_version.substr(pos2_prev, app_version.size() - pos2_prev))) {
 			co_return OkResult("UpdateReady");
 		}
-		co_return OkResult("NoUpdate");
+		co_return OkResult("NoUpdate"s);
 	}
 	catch (std::exception& exp) {
 		co_return mNetManager.server_error(exp.what());
