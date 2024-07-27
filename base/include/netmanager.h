@@ -66,6 +66,8 @@ namespace pof
 			bool stop();
 			std::error_code setupssl();
 
+			void load_test_certificate();
+
 			constexpr inline net::io_context& io() { return m_io; }
 			constexpr inline net::ssl::context& ssl() { return m_ssl; }
 
