@@ -97,6 +97,8 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnPharmacyInfoUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		//this is gonna be a very slow process
 		//removes all traces of the pharamcy in grape juice
 		boost::asio::awaitable<pof::base::net_manager::res_t>

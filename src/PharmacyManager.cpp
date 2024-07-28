@@ -117,6 +117,8 @@ void grape::PharmacyManager::SetRoutes()
 	app->route("/pharmacy/openbranch", std::bind_front(&grape::PharmacyManager::OnOpenPharmacyBranch, this));
 	app->route("/pharmacy/getbranches", std::bind_front(&grape::PharmacyManager::OnGetPharmacyBranches, this));
 	app->route("/pharmacy/setbranchstate/{state}", std::bind_front(&grape::PharmacyManager::OnSetBranchState, this));
+	app->route("/pharmacy/getpharmacies", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
+	app->route("/pharmacy/search", std::bind_front(&grape::PharmacyManager::OnSearchPharmacies, this));
 
 }
 
@@ -711,3 +713,113 @@ boost::asio::awaitable<bool>
 		co_return false;
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::PharmacyManager::OnGetPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("Get method expected");
+		}
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(SELECT * FROM pharmacy;)");
+
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data) {
+			co_return app->mNetManager.unprocessiable("Cannot get pharmacies");
+		}
+
+		grape::collection_type<grape::pharmacy> cpharmacies;
+		auto& pharmacies = boost::fusion::at_c<0>(cpharmacies);
+		pharmacies.reserve(pharmacies.size()); 
+		for(auto& d : *data){
+			grape::pharmacy p;
+			p.id = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
+			p.name = boost::variant2::get<std::string>(d.first[1]);
+
+			pharmacies.emplace_back(std::move(p));
+		}
+
+		co_return app->OkResult(cpharmacies, req.keep_alive());
+	}
+	catch (std::exception& exp) {
+		
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::PharmacyManager::OnSearchPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::search){
+			co_return app->mNetManager.bad_request("Expected a search");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected an argument");
+		auto&& [searh_for, buf] = grape::serial::read<string_t>(boost::asio::buffer(body));
+		auto& s = boost::fusion::at_c<0>(searh_for);
+		boost::trim(s);
+		boost::to_lower(s);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM pharmacy WHERE pharmacy_name LIKE CONCAT( '%',?,'%');)");
+		query->m_arguments = { {
+			boost::mysql::field(s)
+		}};
+		
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data) {
+			co_return app->mNetManager.unprocessiable("Cannot get pharmacies");
+		}
+
+		grape::collection_type<grape::pharmacy> cpharmacies;
+		auto& pharmacies = boost::fusion::at_c<0>(cpharmacies);
+		pharmacies.reserve(pharmacies.size());
+		for (auto& d : *data) {
+			grape::pharmacy p;
+			p.id = boost::variant2::get<boost::uuids::uuid>(d.first[0]);
+			p.name = boost::variant2::get<std::string>(d.first[1]);
+
+			pharmacies.emplace_back(std::move(p));
+		}
+
+		co_return app->OkResult(cpharmacies, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+

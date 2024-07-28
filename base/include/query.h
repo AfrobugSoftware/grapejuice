@@ -362,6 +362,7 @@ namespace pof {
 										datameta.emplace_back(pof::base::data::kind::uint32);
 										break;
 									case boost::mysql::column_type::text:
+									case boost::mysql::column_type::char_:
 										datameta.emplace_back(pof::base::data::kind::text);
 										break;
 									case boost::mysql::column_type::json:
@@ -379,8 +380,9 @@ namespace pof {
 									case boost::mysql::column_type::datetime:
 										datameta.emplace_back(pof::base::data::kind::datetime);
 										break;
-									case boost::mysql::column_type::char_:
 
+									case boost::mysql::column_type::binary:
+										datameta.emplace_back(pof::base::data::kind::null); //place holder for the binary types
 										break;
 									case boost::mysql::column_type::bit:
 									case boost::mysql::column_type::varbinary:
