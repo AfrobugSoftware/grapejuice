@@ -134,7 +134,6 @@ boost::asio::awaitable<void> pof::base::databasemysql::runquery(std::shared_ptr<
 			if (!query->m_hold_connection)
 			{
 				unborrow(query->m_connection);
-				query->m_connection.reset();
 			}
 		}
 		catch (...) {

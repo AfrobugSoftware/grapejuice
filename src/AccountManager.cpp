@@ -478,7 +478,7 @@ bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const b
 				user = v.second;
 			});
 		if (!found && !user.has_value()) return false;
-		if (user.value().session_id != sid) return false; //uid and sid mismatch
+		if (user.value().session_id.value() != sid) return false; //uid and sid mismatch
 		else if (user.value().session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) return false;
 		else return true;
 	}

@@ -92,14 +92,11 @@ namespace grape {
 		};
 
 		//routes handles
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnCreatePharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-				OnPharmacyInfoUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-				OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-				OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreatePharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnPharmacyInfoUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		//this is gonna be a very slow process
 		//removes all traces of the pharamcy in grape juice
 		boost::asio::awaitable<pof::base::net_manager::res_t>

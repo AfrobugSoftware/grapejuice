@@ -43,7 +43,6 @@ namespace grape {
 	};
 };
 
-
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), product, 
 	(boost::uuids::uuid, id)
