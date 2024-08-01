@@ -582,6 +582,17 @@ bool grape::AccountManager::IsUser(const boost::uuids::uuid& accountID, const bo
 		[&](const auto& v) {
 			user = v.second;
 		});
-	if (!found && !user.has_value()) return false;
+	if (!found || !user.has_value()) return false;
 	return (user->id == id);
+}
+
+bool grape::AccountManager::CheckUserPrivilage(const boost::uuids::uuid& userID, grape::account_type atype) const
+{
+	boost::optional<grape::account> user = boost::none;
+	bool found = mActiveSessions.visit(userID,
+		[&](const auto& v) {
+			user = v.second;
+		});
+	if (!found || !user.has_value()) return false;
+	return (user.value().type == atype);
 }

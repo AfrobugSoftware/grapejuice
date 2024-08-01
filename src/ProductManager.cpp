@@ -1269,8 +1269,9 @@ void grape::ProductManager::RemoveCategory()
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
 grape::ProductManager::OnAddInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
-	thread_local static boost::uuids::random_generator_mt19937 uuidGen{};
 	auto app = grape::GetApp();
+	std::unique_ptr<boost::uuids::random_generator_mt19937> uuidGen =
+		std::make_unique<boost::uuids::random_generator_mt19937>();
 	try {
 		if (req.method() != http::verb::post) {
 			co_return app->mNetManager.bad_request("Post method expected");
@@ -1286,7 +1287,7 @@ grape::ProductManager::OnAddInventory(pof::base::net_manager::req_t&& req, boost
 		}
 
 		auto&& [inven, buf2] = grape::serial::read<grape::inventory>(buf);
-		inven.id = uuidGen();
+		inven.id = (*uuidGen)();
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?,?,?);)");
 		query->m_arguments = {{
@@ -1519,7 +1520,7 @@ grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost
 			boost::mysql::field(boost::mysql::blob(prod_id.branch_id.begin(),	prod_id.branch_id.end())),
 			boost::mysql::field(boost::mysql::blob(prod_id.product_id.begin(), prod_id.product_id.end())),
 			boost::mysql::field(pg.begin),
-			boost::mysql::field(pg.limit)
+			boost::mysql::field(pg.begin + pg.limit)
 		} };
 
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
@@ -1556,7 +1557,7 @@ grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost
 
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octlet-stream");
+		res.set(http::field::content_type, "application/octet-stream");
 		res.keep_alive(req.keep_alive());
 		res.body() = std::move(value);
 		res.prepare_payload();
@@ -1618,7 +1619,7 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octlet-stream");
+		res.set(http::field::content_type, "application/octet-stream");
 		res.keep_alive(req.keep_alive());
 		res.body() = std::move(value);
 		res.prepare_payload();
@@ -2098,17 +2099,18 @@ grape::ProductManager::OnMarkAsExpired(pof::base::net_manager::req_t&& req, boos
 
 		auto datetime = std::chrono::system_clock::now();
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(INSERT INTO expired VALUES ( ?, ?,?,?,? ) )");
+			R"(INSERT INTO expired VALUES ( ?,?,?,?,? ) )");
 		query->m_arguments.reserve(v.size());
 		for (auto& p : v) {
 			auto& pi = boost::fusion::at_c<0>(p);
 			auto& s  = boost::fusion::at_c<1>(p);
 			query->m_arguments.emplace_back(
 				std::vector<boost::mysql::field>{
-				boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
-					boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+					boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 					boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
 					boost::mysql::field(boost::mysql::blob(pi.begin(), pi.end())),
+					boost::mysql::field(boost::mysql::datetime(
+						std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(datetime))),
 					boost::mysql::field(s)});
 		}
 
