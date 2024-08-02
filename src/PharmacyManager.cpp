@@ -759,7 +759,7 @@ grape::PharmacyManager::OnGetPharmacies(pof::base::net_manager::req_t&& req, boo
 		co_return app->OkResult(cpharmacies, req.keep_alive());
 	}
 	catch (std::exception& exp) {
-		
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 

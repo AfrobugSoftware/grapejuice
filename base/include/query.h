@@ -124,7 +124,11 @@ namespace pof {
 								datameta.emplace_back(pof::base::data::kind::uint32);
 								break;
 							case boost::mysql::column_type::text:
+							case boost::mysql::column_type::char_:
 								datameta.emplace_back(pof::base::data::kind::text);
+								break;
+							case boost::mysql::column_type::binary:
+								datameta.emplace_back(pof::base::data::kind::null); //place holder for the binary types
 								break;
 							case boost::mysql::column_type::json:
 								datameta.emplace_back(pof::base::data::kind::text);
