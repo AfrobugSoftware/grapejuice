@@ -3,16 +3,19 @@ pkg/boost:shared=True
 
 
 [requires]
-boost/1.84.0
+boost/1.85.0
 fmt/10.0.0
 spdlog/1.11.0
 zlib/1.2.13
-openssl/3.0.7
+openssl/3.2.2
 nlohmann_json/3.11.2
 sqlite3/3.40.1
 lz4/1.9.4
 date/3.0.1
 crowcpp-crow/1.1.0
+
+[tool_requires]
+b2/5.2.0
 
 [generators]
 CMakeDeps

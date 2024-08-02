@@ -89,6 +89,7 @@ namespace grape {
 	using pid = grape::collection_type<boost::fusion::vector<boost::uuids::uuid>>;
 	using optional_list_t = boost::fusion::vector<opt_fields, optional_field<std::vector<boost::uuids::uuid>, 0>>;
 	using string_t = boost::fusion::vector<std::string>;
+	using uid_t = boost::fusion::vector<boost::uuids::uuid>;
 
 	using request = pof::base::net_manager::req_t;
 	using response = pof::base::net_manager::res_t;
@@ -128,7 +129,7 @@ namespace grape {
 		grape::response OkResult(const T& data, bool keep_alive = true, http::status stat = http::status::ok) {
 			grape::response res{ stat, 11 };
 			res.set(http::field::server, USER_AGENT_STRING);
-			res.set(http::field::content_type, "application/octlet-stream");
+			res.set(http::field::content_type, "application/octet-stream");
 			res.keep_alive(keep_alive);
 
 			grape::response::body_type::value_type value(grape::serial::get_size(data), 0x00);

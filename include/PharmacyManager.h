@@ -11,15 +11,7 @@
 #include <boost/fusion/include/define_struct.hpp>
 
 
-//institution
-BOOST_FUSION_DEFINE_STRUCT(
-	(grape), institution,
-	(boost::uuids::uuid, id)
-	(std::string, name)
-	(std::uint8_t, type)
-	(boost::uuids::uuid, address_id)
-	(std::string, info)
-)
+
 
 //pharmacy
 BOOST_FUSION_DEFINE_STRUCT(
@@ -38,7 +30,30 @@ namespace grape {
 		drf,
 		educational
 	};
+
+	enum class branch_state : std::uint32_t {
+		open,
+		closed,
+		shutdown,
+	};
+
+	enum class institution_type : std::uint32_t {
+		hospital,
+		insurance,
+		none
+	};
 };
+
+//institution
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), institution,
+	(boost::uuids::uuid, id)
+	(std::string, name)
+	(grape::institution_type, type)
+	(boost::uuids::uuid, address_id)
+	(std::string, info)
+)
+
 
 //branches
 BOOST_FUSION_DEFINE_STRUCT(
@@ -48,7 +63,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, address_id)
 	(std::string, name)
 	(grape::branch_type, type)
-	(std::uint32_t, state)
+	(grape::branch_state, state)
 	(std::string, info)
 )
 
@@ -79,40 +94,35 @@ namespace grape {
 		void CreateAddressTable();
 		void SetRoutes();
 		//branch state
-		enum : std::uint8_t {
-			NONE_STATE = 0x00,
-			OPEN = 0x01,
-			CLOSED = 0x02,
-		};
-
+	
 		enum : std::uint8_t {
 			NONE = 0x00,
 			HOSPITAL = 0x02,
 			INSURANCE = 0x04,
 		};
 
-		//routes handles
+		//pharmacies
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreatePharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnPharmacyInfoUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnDestroyPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		
+		//branches
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranches(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranchesById(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnClosePharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		
+
+
 		//this is gonna be a very slow process
 		//removes all traces of the pharamcy in grape juice
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-				OnDestroyPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-
-		//queries
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-				OnGetPharmacyBranches(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-
-
 
 		//institutions
-		boost::asio::awaitable<pof::base::net_manager::res_t>
-			OnCreateInstitutions(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateInstitutions(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 	private:
 		boost::asio::awaitable<bool> CheckIfPharmacyExists(const std::string& name);

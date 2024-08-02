@@ -90,36 +90,25 @@ namespace grape
 		void SetRoutes();
 
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignUp(pof::base::net_manager::req_t&& req,
-				boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignUp(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignIn(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignIn(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignOut(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignOut(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignInFromSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignInFromSession(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> GetActiveSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> GetActiveSession(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> UpdateUserAccount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> GetUsersForPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		boost::asio::awaitable<pof::base::net_manager::res_t> UpdateUserAccount(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> GetUsersForPharmacy(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
-
-		bool VerifySession(const boost::uuids::uuid& aid, 
-			const boost::uuids::uuid& sid);
-		
+		bool VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid);
 		boost::asio::awaitable<bool> CheckUsername(const std::string& username);
-
 		boost::asio::awaitable<void> UpdateSessions();
 
+		bool CheckUserPrivilage(const boost::uuids::uuid& user, grape::account_type atype) const;
 		bool AuthuriseRequest(pof::base::net_manager::req_t& req);
-		bool IsUser(const boost::uuids::uuid& accountID,
-			const boost::uuids::uuid& id);
+		bool IsUser(const boost::uuids::uuid& accountID, const boost::uuids::uuid& id);
 		bool RemoveAllAccountsInPharmacy(const boost::uuids::uuid& pharmacyId);
 
 
