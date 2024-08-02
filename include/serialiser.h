@@ -108,6 +108,13 @@ namespace grape
 				}
 			}
 
+			void operator()(std::string_view& v) const {
+				std::uint32_t len = 0;
+				(*this)(len);
+				v = std::string_view(boost::asio::buffer_cast<const char*>(buf_), len);
+				buf_ += len;
+			}
+
 			void operator()(std::chrono::year_month_day& ymd) const {
 				const std::uint32_t i = bswap(*boost::asio::buffer_cast<const std::uint32_t*>(buf_));
 				const short y = (i & 0xFFFF0000) >> 16;

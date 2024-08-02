@@ -408,6 +408,8 @@ void grape::ProductManager::SetRoutes()
 
 	app->route("/product/branch/transfer", std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
 	app->route("/product/branch/getpendtransfers", std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
+
+	app->route("/product/invoice/create", std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -2702,7 +2704,7 @@ grape::ProductManager::OnGetBranchPendTransfers(pof::base::net_manager::req_t&& 
 			}
 			std::tie(ec) = co_await bquery->m_waittime->async_wait();
 			if (ec != boost::asio::error::operation_aborted) {
-				co_return app->mNetManager.timeout_error();
+				 co_return app->mNetManager.timeout_error();
 			}
 
 			auto br = fut.get();
@@ -2845,8 +2847,71 @@ grape::ProductManager::OnRejectBranchTransfers(pof::base::net_manager::req_t&& r
 		co_return app->OkResult("Rejected transfers returned");
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::put) {
+			app->mNetManager.bad_request("expected a put request");
+		}
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+		
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [inv, buf2] = grape::serial::read<grape::invoice>(buf);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO invoice VALUES (?,?,?, ?,?,?,?))");
+
+		auto date = std::chrono::system_clock::now();
+		inv.id = boost::uuids::random_generator_mt19937{}();
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(inv.supplier_id.begin(), inv.supplier_id.end())),
+			boost::mysql::field(boost::mysql::blob(inv.id.begin(), inv.id.end())),
+			boost::mysql::field(boost::mysql::blob(inv.product_id.begin(), inv.product_id.end())),
+			boost::mysql::field(boost::mysql::blob(inv.inventory_id.begin(), inv.inventory_id.end())),
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+				boost::mysql::datetime::time_point::duration>(date)))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+		co_return app->OkResult("Invoice added");
+
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 

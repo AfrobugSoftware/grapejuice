@@ -440,14 +440,12 @@ void pof::base::net_manager::httpsession::on_read(beast::error_code ec, std::siz
 	else {
 		boost::asio::co_spawn(stream_.get_executor(), (*found)(std::move(parser->get()), std::move(m)), [self = shared_from_this()](std::exception_ptr ptr, pof::base::net_manager::res_t res) {
 			using response_type = typename std::decay<decltype(res)>::type;
-		auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
-		http::async_write(self->stream_, *sp,
-			[self = self->shared_from_this(), sp](
-				beast::error_code ec, std::size_t bytes)
-			{
-				self->on_write(ec, bytes, sp->need_eof());
-			});
-		});
+			auto sp = boost::make_shared<response_type>(std::forward<decltype(res)>(res));
+			http::async_write(self->stream_, *sp,
+				[self = self->shared_from_this(), sp](beast::error_code ec, std::size_t bytes) {
+					self->on_write(ec, bytes, sp->need_eof());
+				});
+		});		
 	}
 }
 
