@@ -95,6 +95,15 @@ namespace grape
 				e = static_cast<E>(v);
 			}
 
+
+			template<size_t N>
+				requires (std::integral_constant<int, N>::value <= 32)
+			void operator()(std::bitset<N>& bs) const {
+				std::uint32_t val = 0;
+				(*this)(val);
+				bs = std::bitset<N>(val);
+			}
+
 			template<Hashable K, typename T>
 			void operator()(boost::unordered_flat_map<K, T>& map) const {
 				std::uint32_t len = 0;
@@ -210,8 +219,8 @@ namespace grape
 			mutable opt_fields::bits_type opt_;
 			mutable opt_fields::value_type* optv_;
 
-			writer(boost::asio::mutable_buffer buf) : buf_{ std::move(buf) }, optv_{ nullptr} {}
-			
+			writer(boost::asio::mutable_buffer buf) : buf_{ std::move(buf) }, optv_{ nullptr } {}
+
 			template<Integers T>
 			void operator()(const T& i) const {
 				*boost::asio::buffer_cast<T*>(buf_) = bswap(i);
@@ -219,9 +228,16 @@ namespace grape
 			}
 
 			template<Enums E>
-			void operator()(E& e) const {
+			void operator()(const E& e) const {
 				auto i = static_cast<std::underlying_type_t<E>>(e);
 				(*this)(i);
+			}
+
+			template<size_t N>
+				requires (std::integral_constant<int, N>::value <= 32)
+			void operator()(const std::bitset<N>& bs) const {
+				std::uint32_t val = bs.to_ulong();
+				(*this)(val);
 			}
 
 			void operator()(const std::chrono::year_month_day& ymd) const {
@@ -334,6 +350,11 @@ namespace grape
 			constexpr void operator()(const T& i) const {
 				using htype = std::underlying_type_t<std::decay_t<T>>;
 				size += sizeof(htype);
+			}
+
+			template<size_t N>
+			constexpr void operator()(const std::bitset<N>& bs) const {
+				size += sizeof(std::uint32_t);
 			}
 
 			constexpr void operator()(const std::chrono::year_month_day& ymd) const {

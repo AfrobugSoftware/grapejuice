@@ -194,6 +194,18 @@ BOOST_FUSION_DEFINE_STRUCT(
 )
 
 BOOST_FUSION_DEFINE_STRUCT(
+	(grape), supplier, 
+	(boost::uuids::uuid, pharm_id)
+	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, id)
+	(std::string, name)
+	(std::chrono::system_clock::time_point, date_created)
+	(std::chrono::system_clock::time_point, date_modified)
+	(std::string, info)
+)
+
+
+BOOST_FUSION_DEFINE_STRUCT(
 	(grape), order,
 	(grape::order_state, state)
 	(boost::uuids::uuid, id)
@@ -308,8 +320,16 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkAsExpired(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetExpiredProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
-		//invoices
+		//invoices and suppliers
 		boost::asio::awaitable<grape::response> OnCreateInvoice(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnRemoveInvoice(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnCreateSupplier(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnRemoveSupplier(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetSupplier(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetInvoices(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetInvoicesByDate(grape::request&& req, boost::urls::matches&& match);
+		
+
 
 		//inter branch product management
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnTransferProductsToBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);

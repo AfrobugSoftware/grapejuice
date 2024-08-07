@@ -130,6 +130,8 @@ void grape::ProductManager::CreateSupplierTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS suppliers (
+			pharmacy_id binary(16),
+			branch_id binary(16),
 			supplier_id binary(16),
 			supplier_name text,
 			date_created datetime,
@@ -2857,7 +2859,7 @@ grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matche
 {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::put) {
+		if (req.method() != http::verb::post) {
 			app->mNetManager.bad_request("expected a put request");
 		}
 
@@ -2873,7 +2875,7 @@ grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matche
 		auto&& [inv, buf2] = grape::serial::read<grape::invoice>(buf);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(INSERT INTO invoice VALUES (?,?,?, ?,?,?,?))");
+			R"(INSERT INTO invoice VALUES (?,?,?, ?,?,?,?);)");
 
 		auto date = std::chrono::system_clock::now();
 		inv.id = boost::uuids::random_generator_mt19937{}();
@@ -2904,12 +2906,435 @@ grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matche
 		}
 
 		(void)fut.get();
-		co_return app->OkResult("Invoice added");
+		co_return app->OkResult("Invoice added", req.keep_alive());
 
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
 		app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnCreateSupplier(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("expected a post request");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [supp, buf2] = grape::serial::read<grape::supplier>(buf);
+		boost::trim(supp.name);
+		boost::to_lower(supp.name);
+		
+		auto date = std::chrono::system_clock::now();
+		supp.date_created = date;
+		supp.date_modified = date;
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO suppliers VALUES (?,?,?,?,?,?,?);)");
+		supp.id = boost::uuids::random_generator_mt19937{}();
+		query->m_arguments = {{
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(supp.id.begin(), supp.id.end())),
+			boost::mysql::field(supp.name),
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+				boost::mysql::datetime::time_point::duration>(supp.date_created))),
+			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<
+				boost::mysql::datetime::time_point::duration>(supp.date_modified))),
+			boost::mysql::field(supp.info)
+		}};
+
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("supplier added", req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response>
+grape::ProductManager::OnRemoveSupplier(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::delete_)
+		{
+			co_return app->mNetManager.bad_request("expected a delete method");
+		}
+		
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		
+		if (!app->mAccountManager.CheckUserPrivilage(cred.account_id, grape::account_type::pharmacist)) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [supp, buf2] = grape::serial::read<grape::supplier>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM suppliers WHERE pharmacy_id = ? AND branch_id = ? AND id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(supp.id.begin(), supp.id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("deleted supplier", req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnRemoveInvoice(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::delete_) {
+			co_return app->mNetManager.bad_request("expected a delete method");
+		}
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		//read credentials for the branch you are transfering from
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		if (!app->mAccountManager.CheckUserPrivilage(cred.account_id, grape::account_type::pharmacist)) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [inv, buf2] = grape::serial::read<grape::invoice>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM invoice WHERE id  = ? AND pharmacy_id = ? AND branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(inv.id.begin(), inv.id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+		
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		(void)fut.get();
+
+		co_return app->OkResult("deleted invoice", req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetSupplier(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get request");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		//read credentials
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, 
+			R"(SELECT  pharmacy_id,
+				branch_id,
+				supplier_id,
+				supplier_name,
+				date_created,
+				date_modified,
+				info,
+				ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY supplier_name) as row_id
+				FROM supplier
+				WHERE pharmacy_id = ? AND branch_id = ? AND row_id BETWEEN ? AND ?
+				ORDER BY supplier_name;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No supplier for branch");
+		}
+
+		grape::collection_type<grape::supplier> collection;
+		auto& s = boost::fusion::at_c<0>(collection);
+		s.reserve(data->size());
+
+		for (auto& d : *data) {
+			s.emplace_back(grape::serial::build<grape::supplier>(d.first));
+		}
+
+		co_return app->OkResult(collection, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetInvoices(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get request");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+		//read credentials
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [supid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
+
+		auto& id = boost::fusion::at_c<0>(supid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT 
+			pharmacy_id,
+			branch_id,
+			supplier_id,
+			id,
+			product_id,
+			inventory_id,
+			input_date,
+			ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY input_date DESC) AS row_id
+			FROM invoice 
+			WHERE pharmacy_id = ? AND branch_id = ? AND supplier_id = ? AND row_id BETWEEN ? AND ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No invoices in supplier for branch");
+		}
+
+		grape::collection_type<grape::invoice> collection;
+		auto& s = boost::fusion::at_c<0>(collection);
+		s.reserve(data->size());
+
+		for (auto& d : *data) {
+			s.emplace_back(grape::serial::build<grape::invoice>(d.first));
+		}
+
+		co_return app->OkResult(collection, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetInvoicesByDate(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get request");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+		//read credentials
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [supid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [fd, buf3] = grape::serial::read<grape::ymd>(buf2);
+		auto&& [pg, buf4] = grape::serial::read<grape::page>(buf3);
+
+		if (!fd.value.ok()) {
+			co_return app->mNetManager.bad_request("invalid date passed");
+		}
+		auto& id = boost::fusion::at_c<0>(supid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
+		} };
+		auto& args = query->m_arguments.back();
+		std::ostringstream os;
+		os << R"(SELECT 
+			pharmacy_id,
+			branch_id,
+			supplier_id,
+			id,
+			product_id,
+			inventory_id,
+			input_date,
+			ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY input_date DESC) AS row_id
+			FROM invoice 
+			WHERE pharmacy_id = ? AND branch_id = ? AND supplier_id = ? AND row_id BETWEEN ? AND ? )";
+		//day
+		if (fd.dl.test(0)) {
+			os << "AND DAYOFMONTH(input_date) = ? ";
+			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.day())));
+		}
+
+		//month
+		if (fd.dl.test(1)) {
+			os << "AND MONTH(input_date) = ? ";
+			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.month())));
+
+		}
+
+		//year
+		if (fd.dl.test(2)) {
+			os << "AND YEAR(input_date) = ?";
+			args.push_back(boost::mysql::field(static_cast<std::int32_t>(fd.value.year())));
+
+		}
+		os << ";";
+
+		query->m_sql = std::move(os.str());
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No invoices in supplier for branch");
+		}
+
+		grape::collection_type<grape::invoice> collection;
+		auto& s = boost::fusion::at_c<0>(collection);
+		s.reserve(data->size());
+
+		for (auto& d : *data) {
+			s.emplace_back(grape::serial::build<grape::invoice>(d.first));
+		}
+
+		co_return app->OkResult(collection, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 

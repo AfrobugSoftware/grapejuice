@@ -79,6 +79,14 @@ BOOST_FUSION_DEFINE_STRUCT(
 )
 
 
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), ymd,
+	(std::bitset<3>, dl)
+	(std::chrono::year_month_day, value)
+)
+
+
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
 namespace grape {
@@ -90,6 +98,7 @@ namespace grape {
 	using optional_list_t = boost::fusion::vector<opt_fields, optional_field<std::vector<boost::uuids::uuid>, 0>>;
 	using string_t = boost::fusion::vector<std::string>;
 	using uid_t = boost::fusion::vector<boost::uuids::uuid>;
+
 
 	using request = pof::base::net_manager::req_t;
 	using response = pof::base::net_manager::res_t;
@@ -121,8 +130,10 @@ namespace grape {
 		
 		std::string ExtractString(pof::base::net_manager::req_t& req);
 
-		grape::response OkResult(const std::string& message, const std::string& status = "Successful"s,
-			 bool keep_alive = true, http::status stat = http::status::ok);
+		grape::response OkResult(const std::string& message,
+			 bool keep_alive = true,
+			const std::string& status = "Successful"s,
+			 http::status stat = http::status::ok);
 
 		template<typename T>
 			requires grape::FusionStruct<T>

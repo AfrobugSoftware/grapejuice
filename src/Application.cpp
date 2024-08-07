@@ -125,11 +125,13 @@ std::string grape::Application::ExtractString(pof::base::net_manager::req_t& req
 }
 
 grape::response grape::Application::OkResult(const std::string& message, 
-		const std::string& status, bool keep_alive, http::status stat)
+		bool keep_alive,
+		const std::string& status, 
+		http::status stat)
 {
 	grape::response res{ stat, 11 };
 	res.set(http::field::server, USER_AGENT_STRING);
-	res.set(http::field::content_type, "application/octlet-stream");
+	res.set(http::field::content_type, "application/octet-stream");
 	res.keep_alive(keep_alive);
 
 	grape::result result;
