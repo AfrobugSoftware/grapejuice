@@ -99,10 +99,6 @@ namespace grape {
 	using string_t = boost::fusion::vector<std::string>;
 	using uid_t = boost::fusion::vector<boost::uuids::uuid>;
 
-
-	using request = pof::base::net_manager::req_t;
-	using response = pof::base::net_manager::res_t;
-
 	namespace js = nlohmann;
 	namespace fs = std::filesystem;
 
@@ -153,14 +149,10 @@ namespace grape {
 
 		//application specific routes
 		void SetRoutes();
-		boost::asio::awaitable<pof::base::net_manager::res_t> onAppPing(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> onAppCheckUpdate(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> onAppUpdate(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
-		boost::asio::awaitable<pof::base::net_manager::res_t> onGetOffice(pof::base::net_manager::req_t&& req,
-			boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppPing(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppCheckUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onAppUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> onGetOffice(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
 
 
 		std::string mServerName; 

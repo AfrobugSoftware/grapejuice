@@ -12,6 +12,7 @@
 
 #include "Data.h"
 #include "currency.h"
+#include "netmanager.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -21,6 +22,9 @@
 
 namespace grape
 {
+	using request = pof::base::net_manager::req_t;
+	using response = pof::base::net_manager::res_t;
+
 	template<typename T>
 	concept Integers = std::is_integral_v<T>  || std::is_floating_point_v<T>;
 

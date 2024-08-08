@@ -3257,7 +3257,7 @@ grape::ProductManager::OnGetInvoicesByDate(grape::request&& req, boost::urls::ma
 		auto&& [pg, buf4] = grape::serial::read<grape::page>(buf3);
 
 		if (!fd.value.ok()) {
-			co_return app->mNetManager.bad_request("invalid date passed");
+			co_return app->mNetManager.bad_request("invalid date");
 		}
 		auto& id = boost::fusion::at_c<0>(supid);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
