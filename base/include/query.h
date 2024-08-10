@@ -335,6 +335,7 @@ namespace pof {
 							//signal the query on timeout ...
 							ec = boost::system::error_code(boost::asio::error::timed_out);
 							boost::mysql::throw_on_error(ec, base_t::m_diag);
+							break;
 						default:
 							break;
 						}

@@ -118,9 +118,11 @@ void grape::PharmacyManager::SetRoutes()
 	app->route("/pharmacy/getbranches", std::bind_front(&grape::PharmacyManager::OnGetBranches, this));
 	app->route("/pharmacy/getbranchesid", std::bind_front(&grape::PharmacyManager::OnGetBranchesById, this));
 	app->route("/pharmacy/setbranchstate/{state}", std::bind_front(&grape::PharmacyManager::OnSetBranchState, this));
+	app->route("/pharmacy/getpharmacybyid", std::bind_front(&grape::PharmacyManager::OnGetPharmacyById, this));
 
 	app->route("/pharmacy/getpharmacies", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
 	app->route("/pharmacy/search", std::bind_front(&grape::PharmacyManager::OnSearchPharmacies, this));
+	app->route("/pharmacy/getaddress", std::bind_front(&grape::PharmacyManager::OnGetPharmacyAddress, this));
 
 }
 
@@ -275,6 +277,8 @@ grape::PharmacyManager::OnCreateBranch(pof::base::net_manager::req_t&& req, boos
 
 		//verify the request
 		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
 		auto&& [branch, buf] = grape::serial::read<grape::branch>(boost::asio::buffer(body));
 
 		//extract data from the object
@@ -319,13 +323,13 @@ grape::PharmacyManager::OnCreateBranch(pof::base::net_manager::req_t&& req, boos
 
 		//write the branches
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
-			INSERT INTO branches VALUES (?,?,?,?,?,?);
+			INSERT INTO branches VALUES (?,?,?,?,?,?,?);
 		)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(60));
 		query->m_arguments = { {
-					boost::mysql::field(boost::mysql::blob(branch.pharmacy_id.begin(), branch.pharmacy_id.end())),
 					boost::mysql::field(boost::mysql::blob(branch.id.begin(), branch.id.end())),
+					boost::mysql::field(boost::mysql::blob(branch.pharmacy_id.begin(), branch.pharmacy_id.end())),
 					boost::mysql::field(boost::mysql::blob(address.id.begin(), address.id.end())),
 					boost::mysql::field(branch.name),
 					boost::mysql::field(static_cast<std::underlying_type_t<grape::branch_type>>(branch.type)),
@@ -342,10 +346,8 @@ grape::PharmacyManager::OnCreateBranch(pof::base::net_manager::req_t&& req, boos
 		auto d = fut.get();
 		co_return app->OkResult(branch, req.keep_alive(), http::status::created);
 	}
-	catch (const std::logic_error& jerr) {
-		co_return app->mNetManager.bad_request(jerr.what());
-	}
 	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -782,28 +784,21 @@ grape::PharmacyManager::OnGetBranches(pof::base::net_manager::req_t&& req, boost
 		auto& body = req.body();
 		if (body.empty()) throw std::invalid_argument("Expected an argument"s);
 
-		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
-		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
-			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
-			co_return app->mNetManager.auth_error("Account not authorised");
-		}
-
+		auto&& [pid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
 		//get the count of branches you want to read
 		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 
+		auto& id = boost::fusion::at_c<0>(pid);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT 
-			branch_id,
-			pharmacy_id,
-			address_id,
-			branch_name,
-			branch_type,
-			branch_state,
-			branch_info
-			ROW_NUMBER() OVER (PARTITION BY pharmacy_id ORDER BY name) AS row_id
-			FROM branches WHERE pharmacy_id = ? AND row_id BETWEEN ? AND ?;)"s);
+			R"(SELECT * FROM (
+			SELECT b.*,
+			ROW_NUMBER() OVER (PARTITION BY b.pharmacy_id ORDER BY b.branch_name) AS row_id
+			FROM   branches b
+			WHERE  b.pharmacy_id = ? ) AS subquery
+			HAVING row_id BETWEEN ? AND ?;)"s);
 		query->m_arguments = { {
-			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end())),
+			//boost::mysql::field("ss"s),
 			boost::mysql::field(pg.begin),
 			boost::mysql::field(pg.begin + pg.limit)
 		}};
@@ -839,6 +834,7 @@ grape::PharmacyManager::OnGetBranches(pof::base::net_manager::req_t&& req, boost
 		co_return app->OkResult(branches, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -940,6 +936,99 @@ grape::PharmacyManager::OnGetBranchesById(pof::base::net_manager::req_t&& req, b
 
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::PharmacyManager::OnGetPharmacyAddress(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get request");
+		}
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+		auto&& [pid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
+
+		auto& id = boost::fusion::at_c<0>(pid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT a.*
+			FROM address a
+			JOIN pharmacy p ON p.address_id = a.id
+			WHERE p.pharmacy_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) co_return app->mNetManager.not_found("Address not found");
+
+		co_return app->OkResult(grape::serial::build<grape::address>((*data->begin()).first), req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::PharmacyManager::OnGetPharmacyById(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get method");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+		auto&& [pid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
+		auto& id = boost::fusion::at_c<0>(pid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM pharmacy WHERE pharamcy_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) co_return app->mNetManager.not_found("Pharmacy not found");
+
+		co_return app->OkResult(grape::serial::build<grape::pharmacy>((*data->begin()).first), req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }

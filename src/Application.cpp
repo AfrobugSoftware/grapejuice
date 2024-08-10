@@ -50,8 +50,10 @@ bool grape::Application::Init(int argc, char** argv)
 	//setup update
 	mUpdateAsyncFuncs.emplace_back(std::bind_front(&grape::AccountManager::UpdateSessions, &mAccountManager));
 
+#ifndef _DEBUG
 	boost::asio::co_spawn(mNetManager.io().get_executor(),
 		RunUpdateTimer(), boost::asio::detached);
+#endif
 	return true;
 }
 

@@ -107,7 +107,10 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchPharmacies(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnDestroyPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		
+		boost::asio::awaitable<grape::response> OnGetPharmacyAddress(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetPharmacyById(grape::request&& req, boost::urls::matches&& match);
+
+
 		//branches
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCreateBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranches(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
