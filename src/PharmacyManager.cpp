@@ -122,7 +122,7 @@ void grape::PharmacyManager::SetRoutes()
 
 	app->route("/pharmacy/getpharmacies", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
 	app->route("/pharmacy/search", std::bind_front(&grape::PharmacyManager::OnSearchPharmacies, this));
-	app->route("/pharmacy/getaddress", std::bind_front(&grape::PharmacyManager::OnGetPharmacyAddress, this));
+	app->route("/pharmacy/address", std::bind_front(&grape::PharmacyManager::OnGetPharmacyAddress, this));
 
 }
 

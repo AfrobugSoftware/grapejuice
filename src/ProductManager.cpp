@@ -409,9 +409,19 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/expired/get", std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
 
 	app->route("/product/branch/transfer", std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
-	app->route("/product/branch/getpendtransfers", std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
+	app->route("/product/branch/transfers/getpending", std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
+	app->route("/product/branch/transfers/approve", std::bind_front(&grape::ProductManager::OnApproveBranchTransfers, this));
+	app->route("/product/branch/transfers/reject", std::bind_front(&grape::ProductManager::OnRejectBranchTransfers, this));
 
 	app->route("/product/invoice/create", std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
+	app->route("/product/invoice/remove", std::bind_front(&grape::ProductManager::OnRemoveInvoice, this));
+	app->route("/product/invoice/get", std::bind_front(&grape::ProductManager::OnGetInvoices, this));
+	app->route("/product/invoice/getbydate", std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
+
+	app->route("/product/supplier/create", std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
+	app->route("/product/supplier/remove", std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
+	app->route("/product/supplier/get", std::bind_front(&grape::ProductManager::OnGetSupplier, this));
+
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -623,9 +633,9 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
-
+		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT p.id,
+			R"(SELECT * FROM (SELECT p.id,
 				p.serial_num,
 				p.name,
 				p.generic_name,
@@ -641,13 +651,19 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 				p.sideeffects,
 				p.barcode,
 				pp.category_id,
-				pp.min_stock_count
-	   FROM products p, pharma_products pp
-       WHERE pp.pharmacy_id = ? AND pp.branch_id = ? AND p.id = pp.product_id;)");
+				pp.min_stock_count,
+				ROW_NUMBER() OVER (ORDER BY p.name) AS row_id
+	   FROM products p
+	   INNER JOIN pharma_products pp
+	   ON p.id = pp.product_id
+       WHERE pp.pharmacy_id = ? AND pp.branch_id = ?) AS sub
+	   HAVING row_id BETWEEN ? AND ?;)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_arguments = { {
 		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
-		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))	
+		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+		boost::mysql::field(pg.begin),
+		boost::mysql::field(pg.begin + pg.limit)
 		} };
 		query->m_waittime->expires_after(60s);
 		auto fut = query->get_future();
@@ -690,7 +706,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octlet-stream");
+		res.set(http::field::content_type, "application/octet-stream");
 		res.keep_alive(req.keep_alive());
 		res.body() = std::move(value);
 		res.prepare_payload();
@@ -779,13 +795,20 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
+		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT * FROM formulary WHERE access_level = ? OR creator_id = ? LIMIT 100;)");
+			R"(SELECT * FROM ( SELECT f.*,
+			ROW_NUMBER() OVER () AS row_id
+			FROM formulary f 
+			WHERE f.access_level = ? OR f.creator_id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(static_cast<std::underlying_type_t<
 				grape::formulary_access_level>>(grape::formulary_access_level::ACCESS_PUBLIC)),
-			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(pg.begin),
+			boost::mysql::field(pg.begin + pg.limit)
 		} };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(60s);
@@ -839,7 +862,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT  p.id,
+			R"(SELECT * FROM ( SELECT p.id,
 				p.serial_num,
 				p.name,
 				p.generic_name,
@@ -856,10 +879,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 				p.barcode,
 				p.manufactures_name,
 				pp.category_id,
-				pp.min_stock_count
+				pp.min_stock_count,
 			ROW_NUMBER() OVER ( ORDER BY p.name) AS row_id
-			FROM products p, pharma_product pp, formulary_content fc
-			WHERE pp.product_id = p.id AND  fc.product_id = p.id AND fc.id = ? AND row_id BETWEEN ? AND ?;)");
+			FROM products p
+			INNER JOIN pharma_product pp
+				ON  pp.product_id = p.id
+			INNER JOIN formulary_content fc
+				ON  pp.product_id = fc.product_id 
+			WHERE fc.id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
 			boost::mysql::field(pg.begin),
@@ -918,21 +946,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
 		
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT p.id
-				p.serial_num,
-				p.name,
-				p.generic_name,
-				p.class,
-				p.formulation,
-				p.strength,
-				p.strength_type,
-				p.usage_info,
-				p.sideeffects,
-				p.barcode,
-				p.manufactures_name,
+			R"(SELECT * FROM (SELECT p.*,
 			ROW_NUMBER() OVER ( ORDER BY p.name) AS row_id
-			FROM products p, formulary_content fc
-			WHERE p.id = fc.product_id AND fc.formulary_id = ? AND row_id BETWEEN ? AND ?;)");
+			FROM products p
+			JOIN formulary_content fc ON p.id = fc.product_id
+			WHERE fc.formulary_id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
 			boost::mysql::field(pg.begin),
@@ -1514,11 +1533,11 @@ grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost
 		auto&& [pg, buf3] = grape::serial::read<grape::page>(buf2);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT pharmacy_id,
-			branch_id, id, product_id, expire_date, input_date, stock_count, cost, supplier_id,lot_number,
+			R"(SELECT * FROM ( SELECT i.*,
 			ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY input_date DESC) AS row_id 
-			FROM inventory 
-			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? AND row_id BETWEEN ? AND ?;)");
+			FROM inventory i
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(prod_id.pharmacy_id.begin(), prod_id.pharmacy_id.end())),
 			boost::mysql::field(boost::mysql::blob(prod_id.branch_id.begin(),	prod_id.branch_id.end())),
@@ -1678,7 +1697,7 @@ grape::ProductManager::OnAddCategory(pof::base::net_manager::req_t&& req, boost:
 
 		(void)fut.get();
 
-		co_return app->OkResult("Added category");
+		co_return app->OkResult("Added category", req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
@@ -2004,20 +2023,10 @@ grape::ProductManager::OnSearchFormulary(pof::base::net_manager::req_t&& req, bo
 		boost::trim(ss);
 		boost::to_lower(ss);
 		std::string search = fmt::format(R"(SELECT 
-		 p.id
-		 p.serial_num,
-		 p.name,
-		 p.generic_name,
-		 p.class,
-		 p.formulation,
-		 p.strength,
-		 p.strength_type,
-		 p.usage_info,
-		 p.sideeffects,
-		 p.barcode,
-		 p.manufactures_name
-		 FROM products p, formulary_content fc
-		 WHERE p.id = fc.product_id AND fc.formulary_id = ? AND p.{} LIKE '{}%' ORDER BY p.name;)", type, ss);
+		 p.*
+		 FROM products p
+		 JOIN formulary_content fc ON p.id = fc.product_id 
+		 WHERE fc.formulary_id = ? AND p.{} LIKE CONCAT('{}', '%') ORDER BY p.name;)", type, ss);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			std::move(search));
@@ -3108,17 +3117,11 @@ grape::ProductManager::OnGetSupplier(grape::request&& req, boost::urls::matches&
 		}
 		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, 
-			R"(SELECT  pharmacy_id,
-				branch_id,
-				supplier_id,
-				supplier_name,
-				date_created,
-				date_modified,
-				info,
+			R"(SELECT * FROM (SELECT s.*,
 				ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY supplier_name) as row_id
-				FROM supplier
-				WHERE pharmacy_id = ? AND branch_id = ? AND row_id BETWEEN ? AND ?
-				ORDER BY supplier_name;)");
+				FROM suppliers s
+				WHERE pharmacy_id = ? AND branch_id = ? ) AS sub 
+				HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
@@ -3183,17 +3186,11 @@ grape::ProductManager::OnGetInvoices(grape::request&& req, boost::urls::matches&
 
 		auto& id = boost::fusion::at_c<0>(supid);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT 
-			pharmacy_id,
-			branch_id,
-			supplier_id,
-			id,
-			product_id,
-			inventory_id,
-			input_date,
-			ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY input_date DESC) AS row_id
-			FROM invoice 
-			WHERE pharmacy_id = ? AND branch_id = ? AND supplier_id = ? AND row_id BETWEEN ? AND ?;)");
+			R"(SELECT * FROM ( SELECT i.*,
+			ROW_NUMBER() OVER (PARTITION BY i.branch_id ORDER BY i.input_date DESC) AS row_id
+			FROM invoice i
+			WHERE pharmacy_id = ? AND branch_id = ? AND supplier_id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
@@ -3264,43 +3261,36 @@ grape::ProductManager::OnGetInvoicesByDate(grape::request&& req, boost::urls::ma
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
-			boost::mysql::field(boost::mysql::blob(id.begin(), id.end())),
-			boost::mysql::field(pg.begin),
-			boost::mysql::field(pg.begin + pg.limit)
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
 		} };
 		auto& args = query->m_arguments.back();
 		std::ostringstream os;
-		os << R"(SELECT 
-			pharmacy_id,
-			branch_id,
-			supplier_id,
-			id,
-			product_id,
-			inventory_id,
-			input_date,
-			ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY input_date DESC) AS row_id
-			FROM invoice 
-			WHERE pharmacy_id = ? AND branch_id = ? AND supplier_id = ? AND row_id BETWEEN ? AND ? )";
+		os << R"(SELECT * FROM ( SELECT i.*,
+			ROW_NUMBER() OVER (PARTITION BY i.branch_id ORDER BY i.input_date DESC) AS row_id
+			FROM invoice i 
+			WHERE i.pharmacy_id = ? AND i.branch_id = ? AND i.supplier_id = ? )";
 		//day
 		if (fd.dl.test(0)) {
-			os << "AND DAYOFMONTH(input_date) = ? ";
+			os << "AND DAYOFMONTH(input_date) = ? "s;
 			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.day())));
 		}
 
 		//month
 		if (fd.dl.test(1)) {
-			os << "AND MONTH(input_date) = ? ";
+			os << "AND MONTH(input_date) = ? "s;
 			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.month())));
 
 		}
 
 		//year
 		if (fd.dl.test(2)) {
-			os << "AND YEAR(input_date) = ?";
+			os << "AND YEAR(input_date) = ?"s;
 			args.push_back(boost::mysql::field(static_cast<std::int32_t>(fd.value.year())));
 
 		}
-		os << ";";
+		os << ") AS sub HAVING row_id BETWEEN ? AND ?;"s;
+		args.push_back(boost::mysql::field(pg.begin));
+		args.push_back(boost::mysql::field(pg.begin + pg.limit));
 
 		query->m_sql = std::move(os.str());
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
@@ -3338,5 +3328,19 @@ grape::ProductManager::OnGetInvoicesByDate(grape::request&& req, boost::urls::ma
 	}
 }
 
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetSupplierByDate(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
 
 
