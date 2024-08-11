@@ -325,6 +325,7 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnRemoveInvoice(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetInvoices(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetInvoicesByDate(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetProductsInInvoice(grape::request&& req, boost::urls::matches&& match);
 
 		boost::asio::awaitable<grape::response> OnCreateSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnRemoveSupplier(grape::request&& req, boost::urls::matches&& match);

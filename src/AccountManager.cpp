@@ -15,7 +15,7 @@ void grape::AccountManager::CreateAccountTable()
 	auto app = grape::GetApp();
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase);
 	query->m_sql = R"(CREATE TABLE IF NOT EXISTS accounts (
-		id binary(16),
+		pharmacy_id binary(16),
 		account_id binary(16),
 		account_type tinyint,
 		privilage integer,
@@ -64,40 +64,21 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 	auto app = grape::GetApp();
 	
 	try {
-		if (!req.has_content_length()) {
-			co_return app->mNetManager.bad_request("Expected a body");
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("expected a post request");
 		}
+
 		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
 		auto&& [account, buf] = grape::serial::read<grape::account>(boost::asio::buffer(body));
-
-
-		//verify data
-		if (!grape::VerifyEmail(account.email)) {
-			co_return app->mNetManager.bad_request("Invalid email");
-		}
-
-		if (!grape::VerifyPhonenumber(account.phonenumber)) {
-			co_return app->mNetManager.bad_request("Invalid email");
-		}
 
 		if (bool b = co_await CheckUsername(account.username)) {
 			co_return app->mNetManager.bad_request("Username already exisits");
 		}
 
-		//split dob{ year-month-day} into year,month,day
-		std::array<size_t, 3> dates = {};
-		int i = 0;
-		for (const auto s : std::views::split(account.dob, '-')) {
-			dates[i] = boost::lexical_cast<size_t>(std::string(s.begin(), s.end()));
-			i++;
-		}
-
-
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			 R"(INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		std::vector<boost::mysql::field> args;
-		account.id = boost::uuids::random_generator_mt19937{}();
-		const auto niluuid = boost::uuids::nil_uuid();
 
 		std::string_view sq, sa;
 		if(account.sec_que.has_value()){
@@ -106,16 +87,17 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (account.sec_ans.has_value()) {
 			sa = account.sec_ans.value();
 		}
-
-		args.reserve(14);
+		account.account_id = boost::uuids::random_generator_mt19937{}();
+		const auto niluuid = boost::uuids::nil_uuid();
 		args = {
-				boost::mysql::field(boost::mysql::blob(account.id.begin(), account.id.end())),
+				boost::mysql::field(boost::mysql::blob(account.pharmacy_id.begin(), account.pharmacy_id.end())),
 				boost::mysql::field(boost::mysql::blob(account.account_id.begin(), account.account_id.end())),
 				boost::mysql::field(static_cast<std::underlying_type_t<grape::account_type>>(account.type)),
-				boost::mysql::field(account.privilage),
+				boost::mysql::field(account.privilage.to_ullong()),
 				boost::mysql::field(account.first_name),
 				boost::mysql::field(account.last_name),
-				boost::mysql::field(boost::mysql::date(dates[0], dates[1], dates[2])),
+				boost::mysql::field(boost::mysql::date((std::int32_t)account.dob.year(), 
+					(std::uint32_t)account.dob.month(), (std::uint32_t)account.dob.day())),
 				boost::mysql::field(account.phonenumber),
 				boost::mysql::field(account.email),
 				boost::mysql::field(account.username),
@@ -156,8 +138,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			spdlog::error(err.what());
 			co_return app->mNetManager.server_error(err.what());
 		}
+
 		//send response
-		co_return app->OkResult("Account Signed up");
+		grape::uid_t id;
+		boost::fusion::at_c<0>(id) = account.account_id;
+		co_return app->OkResult(id, req.keep_alive());
 	}
 	catch (const std::logic_error& err) {
 		spdlog::error(err.what());
@@ -187,10 +172,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		std::string sql;
 		if (grape::VerifyEmail(account_cred.username)) {
-			sql = R"(SELECT * FROM accounts WHERE email = ? AND id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE email = ? AND account_id = ?;)"s;
 		}
 		else {
-			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND account_id = ?;)"s;
 		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, std::move(sql));
@@ -408,9 +393,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try {
-		if (!AuthuriseRequest(req)) {
-			co_return app->mNetManager.auth_error("Account not authorised");
-		}
+		
 
 		co_return app->OkResult("Updated user account");
 	}
@@ -525,7 +508,7 @@ boost::asio::awaitable<void>
 		if (mActiveSessions.empty()) {
 			//the server is starting up, check dataabase for active sessions
 			auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
-			SELECT * FROM accounts WHERE session_id IS NOT ?;
+			SELECT * FROM accounts WHERE session_id != ?;
 		)");
 			auto nullid = boost::uuids::nil_uuid();
 			query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))} };
@@ -583,7 +566,7 @@ bool grape::AccountManager::IsUser(const boost::uuids::uuid& accountID, const bo
 			user = v.second;
 		});
 	if (!found || !user.has_value()) return false;
-	return (user->id == id);
+	return (user->account_id == id);
 }
 
 bool grape::AccountManager::CheckUserPrivilage(const boost::uuids::uuid& userID, grape::account_type atype) const

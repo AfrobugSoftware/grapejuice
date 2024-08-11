@@ -77,6 +77,12 @@ namespace grape
 	template<>
 	class is_optional_field_set<opt_fields> : public std::true_type {};
 
+	template<typename T>
+	struct is_bitset : std::false_type {};
+
+	template<std::size_t N>
+	struct is_bitset<std::bitset<N>> : std::true_type {};
+
 
 	namespace serial {
 		class reader {
@@ -357,6 +363,7 @@ namespace grape
 			}
 
 			template<size_t N>
+				requires (std::integral_constant<int, N>::value <= 32)
 			constexpr void operator()(const std::bitset<N>& bs) const {
 				size += sizeof(std::uint32_t);
 			}
@@ -461,11 +468,23 @@ namespace grape
 							std::move(boost::variant2::get<get_type>(row[constant::value]));
 					}
 				}
+				else if constexpr (grape::is_bitset<arg_type>::value) {
+					std::uint32_t bits = boost::variant2::get<std::uint32_t>(row[constant::value]);
+					boost::fusion::at<constant>(ret) = arg_type{ bits };
+				}
 				else if constexpr (std::is_enum_v<arg_type>) {
 					using htype = std::underlying_type_t<arg_type>;
 					if (boost::variant2::holds_alternative<htype>(row[constant::value])) {
 						boost::fusion::at<constant>(ret) =
 							static_cast<arg_type>(std::move(boost::variant2::get<htype>(row[constant::value])));
+					}
+				}
+				else if constexpr (std::is_same_v<std::chrono::year_month_day, arg_type>) {
+					if (boost::variant2::holds_alternative<pof::base::data::datetime_t>(row[constant::value])) {
+						auto& datetime = boost::variant2::get<pof::base::data::datetime_t>(row[constant::value]);
+						auto days = std::chrono::time_point_cast<std::chrono::sys_days::duration>(datetime);
+						boost::fusion::at<constant>(ret) =
+							std::chrono::year_month_day{ days };
 					}
 				}
 				else{

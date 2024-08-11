@@ -123,6 +123,7 @@ void grape::PharmacyManager::SetRoutes()
 	app->route("/pharmacy/getpharmacies", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
 	app->route("/pharmacy/search", std::bind_front(&grape::PharmacyManager::OnSearchPharmacies, this));
 	app->route("/pharmacy/address", std::bind_front(&grape::PharmacyManager::OnGetPharmacyAddress, this));
+	app->route("/pharmacy/branch/address", std::bind_front(&grape::PharmacyManager::OnGetBranchAddress, this));
 
 }
 
@@ -1030,6 +1031,50 @@ grape::PharmacyManager::OnGetPharmacyById(grape::request&& req, boost::urls::mat
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::PharmacyManager::OnGetBranchAddress(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get request");
+		}
+		auto& body = req.body();
+		auto&& [bid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
+		auto& id = boost::fusion::at_c<0>(bid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT a.* 
+			FROM address a INNER JOIN branches b ON b.address_id = a.address_id
+			WHERE b.branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
+		} };
+
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) co_return app->mNetManager.not_found("Address not found");
+
+		co_return app->OkResult(grape::serial::build<grape::address>((*data->begin()).first), req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		app->mNetManager.server_error(exp.what());
 	}
 }
 

@@ -118,6 +118,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSetBranchState(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnClosePharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranchAddress(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		
 
 

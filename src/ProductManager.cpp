@@ -2887,7 +2887,7 @@ grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matche
 			R"(INSERT INTO invoice VALUES (?,?,?, ?,?,?,?);)");
 
 		auto date = std::chrono::system_clock::now();
-		inv.id = boost::uuids::random_generator_mt19937{}();
+		if(inv.id.is_nil()) inv.id = boost::uuids::random_generator_mt19937{}();
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
@@ -2915,7 +2915,10 @@ grape::ProductManager::OnCreateInvoice(grape::request&& req, boost::urls::matche
 		}
 
 		(void)fut.get();
-		co_return app->OkResult("Invoice added", req.keep_alive());
+
+		grape::uid_t id;
+		boost::fusion::at_c<0>(id) = inv.id;
+		co_return app->OkResult(id, req.keep_alive());
 
 	}
 	catch (const std::exception& exp) {
@@ -2949,10 +2952,10 @@ grape::ProductManager::OnCreateSupplier(grape::request&& req, boost::urls::match
 		auto date = std::chrono::system_clock::now();
 		supp.date_created = date;
 		supp.date_modified = date;
+		if (supp.id.is_nil()) supp.id = boost::uuids::random_generator_mt19937{}();
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO suppliers VALUES (?,?,?,?,?,?,?);)");
-		supp.id = boost::uuids::random_generator_mt19937{}();
 		query->m_arguments = {{
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
@@ -3334,8 +3337,82 @@ grape::ProductManager::OnGetSupplierByDate(grape::request&& req, boost::urls::ma
 	try {
 		if (req.method() != http::verb::get)
 			co_return app->mNetManager.bad_request("expected a get");
+		
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
 
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [pid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [fd, buf3] = grape::serial::read<grape::ymd>(buf2);
+		auto&& [pg, buf4] = grape::serial::read<grape::page>(buf3);
 
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+		auto& args = query->m_arguments.back();
+		std::ostringstream os;
+		os << R"(SELECT * FROM ( SELECT s.*,
+			ROW_NUMBER() OVER (PARTITION BY s.pharmacy_id ORDER BY s.date_created) AS row_id 
+			FROM suppliers s
+			WHERE s.pharmacy_id = ? AND s.branch_id = ? )";
+		//day
+		if (fd.dl.test(0)) {
+			os << "AND DAYOFMONTH(input_date) = ? "s;
+			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.day())));
+		}
+
+		//month
+		if (fd.dl.test(1)) {
+			os << "AND MONTH(input_date) = ? "s;
+			args.push_back(boost::mysql::field(static_cast<std::uint32_t>(fd.value.month())));
+		}
+		//year
+		if (fd.dl.test(2)) {
+			os << "AND YEAR(input_date) = ?"s;
+			args.push_back(boost::mysql::field(static_cast<std::int32_t>(fd.value.year())));
+
+		}
+
+		os << R"( ) AS sub HAVING row_id BETWEEN ? AND ?;)";
+		args.push_back(boost::mysql::field(pg.begin));
+		args.push_back(boost::mysql::field(pg.begin + pg.limit));
+
+		query->m_sql = std::move(os.str());
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(60s);
+		auto fut = query->get_future();
+		bool tried = app->mDatabase->push(query);
+		if (!tried) {
+			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+			if (!tried) {
+				co_return app->mNetManager.server_error("Error in query");
+			}
+		}
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted) {
+			co_return app->mNetManager.timeout_error();
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty()) {
+			co_return app->mNetManager.not_found("No suppliers for branch");
+		}
+
+		grape::collection_type<grape::supplier> collection;
+		auto& s = boost::fusion::at_c<0>(collection);
+		s.reserve(data->size());
+
+		for (auto& d : *data) {
+			s.emplace_back(grape::serial::build<grape::supplier>(d.first));
+		}
+
+		co_return app->OkResult(collection, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
@@ -3343,4 +3420,41 @@ grape::ProductManager::OnGetSupplierByDate(grape::request&& req, boost::urls::ma
 	}
 }
 
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetProductsInInvoice(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get method");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
 
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [id, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto& invid = boost::fusion::at_c<0>(id);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM ( SELECT 
+			
+			ROW_NUMBER() OVER (PARTITION BY i.branch_id ORDER BY i.input_date) AS row_id
+			FROM products p
+			INNER JOIN pharma_products pp 
+			ON pp.product_id = p.id
+			INNER JOIN invoice i
+			ON pp.product_id = i.product_id
+			INNER JOIN inventory ii
+			ON i.product_id = ii.product_id
+			WHERE i.pharmacy_id = ? AND i.branch_id = ? ) AS sub
+			HAVING row_id BETWEEN ? AND ?;)");
+
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
