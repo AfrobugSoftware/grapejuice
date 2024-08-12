@@ -17,7 +17,7 @@ void grape::AccountManager::CreateAccountTable()
 	query->m_sql = R"(CREATE TABLE IF NOT EXISTS accounts (
 		pharmacy_id binary(16),
 		account_id binary(16),
-		account_type tinyint,
+		account_type integer,
 		privilage integer,
 		account_first_name text,
 		account_last_name text,
@@ -73,11 +73,24 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto&& [account, buf] = grape::serial::read<grape::account>(boost::asio::buffer(body));
 
 		if (bool b = co_await CheckUsername(account.username)) {
-			co_return app->mNetManager.bad_request("Username already exisits");
+			co_return app->mNetManager.bad_request("username already exisits");
 		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			 R"(INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
+			 R"(INSERT INTO accounts 
+				(pharmacy_id,
+				account_id,
+				account_type,
+				privilage,
+				account_first_name,
+				account_last_name,
+				account_date_of_birth,
+				phonenumber,
+				email,
+				account_username,
+				account_passhash,
+				sec_question,
+				sec_ans_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		std::vector<boost::mysql::field> args;
 
 		std::string_view sq, sa;
@@ -103,11 +116,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				boost::mysql::field(account.username),
 				boost::mysql::field(account.passhash.value()),
 				boost::mysql::field(sq),
-				boost::mysql::field(sa),
-				boost::mysql::field(boost::mysql::datetime()),
-				boost::mysql::field(boost::mysql::datetime()),
-				boost::mysql::field(boost::mysql::blob(niluuid.begin(), niluuid.end())),
-				boost::mysql::field(boost::mysql::datetime())
+				boost::mysql::field(sa)
 		};
 
 		try {
@@ -172,10 +181,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		std::string sql;
 		if (grape::VerifyEmail(account_cred.username)) {
-			sql = R"(SELECT * FROM accounts WHERE email = ? AND account_id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE email = ? AND pharmacy_id = ?;)"s;
 		}
 		else {
-			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND account_id = ?;)"s;
+			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)"s;
 		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, std::move(sql));
@@ -320,10 +329,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 	auto app = grape::GetApp();
 	try {
 		if (req.method() != http::verb::put) {
-			co_return app->mNetManager.bad_request("GET method expected");
+			co_return app->mNetManager.bad_request("get method expected");
 		}
 		if(!req.has_content_length()){
-			co_return app->mNetManager.bad_request("Body is required");
+			co_return app->mNetManager.bad_request("body is required");
 		}
 
 		auto& body = req.body();

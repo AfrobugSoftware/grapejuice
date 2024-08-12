@@ -578,32 +578,29 @@ boost::asio::awaitable<bool>
 {
 	if (name.empty()) co_return false;
 	auto app = grape::GetApp();
-	try {
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT 1 FROM pharmacy WHERE pharmacy_name = ?;)");
-		query->m_arguments = { {
-				boost::mysql::field(name)
-			} };
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(60s);
-		auto fut = query->get_future();
-		app->mDatabase->push(query);
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			throw std::system_error(std::make_error_code(std::errc::timed_out));
+	auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+	R"(SELECT 1 FROM pharmacy WHERE pharmacy_name = ?;)");
+	query->m_arguments = { {
+			boost::mysql::field(name)
+	} };
+	query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+	query->m_waittime->expires_after(60s);
+	auto fut = query->get_future();
+	bool tried = app->mDatabase->push(query);
+	if (!tried) {
+		tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+		if (!tried) {
+			throw std::logic_error("error in query");
 		}
+	}
+	auto&& [ec] = co_await query->m_waittime->async_wait();
+	if (ec != boost::asio::error::operation_aborted) {
+		throw std::logic_error("timeout in check");
+	}
 		
-		auto d = fut.get(); //I need to suspend and not block
+	auto d = fut.get();
 
-		co_return (d != nullptr && !d->empty());
-	}
-	catch (boost::mysql::error_with_diagnostics& err){
-		co_return false;
-	}
-	catch (const std::exception& exp) {
-		
-		co_return false;
-	}
+	co_return (d != nullptr && !d->empty());
 }
 
 boost::asio::awaitable<bool> grape::PharmacyManager::CheckIfInstitutionExists(const std::string& name)

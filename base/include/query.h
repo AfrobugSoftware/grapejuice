@@ -425,11 +425,20 @@ namespace pof {
 										v[i] = static_cast<std::uint8_t>(row.at(i).as_int64());
 										break;
 									case boost::mysql::column_type::int_:
-										v[i] = row.at(i).as_int64();
-										break;
 									case boost::mysql::column_type::bigint:
+									{
+										if (row.at(i).is_uint64())
+										{
+											v[i] = row.at(i).as_uint64();
+											datameta[i] = pof::base::data::kind::uint64;
+										}
+										else {
+											v[i] = row.at(i).as_int64();
+											datameta[i] = pof::base::data::kind::int64;
+										}
+										break;
+									}
 									case boost::mysql::column_type::decimal:
-										v[i] = row.at(i).as_uint64();
 										break;
 									case boost::mysql::column_type::float_:
 										v[i] = row.at(i).as_float();
