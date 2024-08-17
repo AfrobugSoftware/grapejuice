@@ -55,6 +55,8 @@ void grape::AccountManager::SetRoutes()
 	app->route("/account/signout", std::bind_front(&grape::AccountManager::OnSignOut, this));
 	app->route("/account/updateaccount", std::bind_front(&grape::AccountManager::UpdateUserAccount, this));
 	app->route("/account/getpharmacyusers", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
+	app->route("/account/checkname/{name}", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
+
 }
 
 
@@ -71,10 +73,6 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto& body = req.body();
 		if (body.empty()) throw std::invalid_argument("expected a body");
 		auto&& [account, buf] = grape::serial::read<grape::account>(boost::asio::buffer(body));
-
-		if (bool b = co_await CheckUsername(account.username)) {
-			co_return app->mNetManager.bad_request("username already exisits");
-		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			 R"(INSERT INTO accounts 
@@ -587,4 +585,26 @@ bool grape::AccountManager::CheckUserPrivilage(const boost::uuids::uuid& userID,
 		});
 	if (!found || !user.has_value()) return false;
 	return (user.value().type == atype);
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::AccountManager::OnCheckUsernameExists(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get reqest");
+		
+		std::string name = match["name"];
+
+		boost::trim(name);
+		boost::to_lower(name);
+		if (!(co_await CheckUsername(name))) {
+			co_return app->mNetManager.not_found("username does not exisits");
+		}
+
+		co_return app->OkResult("username exists");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
 }

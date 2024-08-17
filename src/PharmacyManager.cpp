@@ -26,7 +26,7 @@ void grape::PharmacyManager::CreatePharmacyTable()
 			CREATE TABLE IF NOT EXISTS pharmacy (
 			pharmacy_id binary(16) not null,
 			pharmacy_name text,
-			pharamcy_address binary(16),
+			address_id binary(16),
 			pharmacy_info text
 		);)");
 	auto fut = query->get_future();
@@ -113,17 +113,19 @@ void grape::PharmacyManager::SetRoutes()
 {
 	auto app = grape::GetApp();
 	app->route("/pharmacy/create", std::bind_front(&grape::PharmacyManager::OnCreatePharmacy, this));
-	app->route("/pharmacy/createbranch", std::bind_front(&grape::PharmacyManager::OnCreateBranch, this));
-	app->route("/pharmacy/openbranch", std::bind_front(&grape::PharmacyManager::OnOpenPharmacyBranch, this));
-	app->route("/pharmacy/getbranches", std::bind_front(&grape::PharmacyManager::OnGetBranches, this));
-	app->route("/pharmacy/getbranchesid", std::bind_front(&grape::PharmacyManager::OnGetBranchesById, this));
-	app->route("/pharmacy/setbranchstate/{state}", std::bind_front(&grape::PharmacyManager::OnSetBranchState, this));
-	app->route("/pharmacy/getpharmacybyid", std::bind_front(&grape::PharmacyManager::OnGetPharmacyById, this));
-
-	app->route("/pharmacy/getpharmacies", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
+	app->route("/pharmacy/get", std::bind_front(&grape::PharmacyManager::OnGetPharmacies, this));
+	app->route("/pharmacy/getbyid", std::bind_front(&grape::PharmacyManager::OnGetPharmacyById, this));
+	app->route("/pharmacy/checkname/{name}", std::bind_front(&grape::PharmacyManager::OnCheckPharmacyNameExists, this));
 	app->route("/pharmacy/search", std::bind_front(&grape::PharmacyManager::OnSearchPharmacies, this));
 	app->route("/pharmacy/address", std::bind_front(&grape::PharmacyManager::OnGetPharmacyAddress, this));
+
+	app->route("/pharmacy/branch/create", std::bind_front(&grape::PharmacyManager::OnCreateBranch, this));
+	app->route("/pharmacy/branch/open", std::bind_front(&grape::PharmacyManager::OnOpenPharmacyBranch, this));
+	app->route("/pharmacy/branch/get", std::bind_front(&grape::PharmacyManager::OnGetBranches, this));
+	app->route("/pharmacy/branch/getbyid", std::bind_front(&grape::PharmacyManager::OnGetBranchesById, this));
+	app->route("/pharmacy/branch/setstate/{state}", std::bind_front(&grape::PharmacyManager::OnSetBranchState, this));
 	app->route("/pharmacy/branch/address", std::bind_front(&grape::PharmacyManager::OnGetBranchAddress, this));
+	app->route("/pharmacy/branch/checkname/{name}", std::bind_front(&grape::PharmacyManager::OnCheckBranchNameExists, this));
 
 }
 
@@ -728,7 +730,7 @@ grape::PharmacyManager::OnSearchPharmacies(pof::base::net_manager::req_t&& req, 
 		boost::to_lower(s);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT * FROM pharmacy WHERE pharmacy_name LIKE CONCAT( '%',?,'%');)");
+			R"(SELECT * FROM pharmacy WHERE pharmacy_name LIKE CONCAT( ?,'%');)");
 		query->m_arguments = { {
 			boost::mysql::field(s)
 		}};
@@ -928,9 +930,10 @@ grape::PharmacyManager::OnGetBranchesById(pof::base::net_manager::req_t&& req, b
 		}
 
 		auto data = fut.get();
-		if (!data || data->empty()) co_return app->mNetManager.not_found("Branch not found");
-
-		co_return app->OkResult(grape::serial::build<grape::branch>((*data->begin()).first), req.keep_alive());
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Branch not found");
+		auto brn = grape::serial::build<grape::branch>((*data->begin()).first);
+		co_return app->OkResult(brn, req.keep_alive());
 
 	}
 	catch (const std::exception& exp) {
@@ -955,8 +958,7 @@ grape::PharmacyManager::OnGetPharmacyAddress(grape::request&& req, boost::urls::
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT a.*
 			FROM address a
-			JOIN pharmacy p ON p.address_id = a.id
-			WHERE p.pharmacy_id = ?;)");
+			WHERE a.address_id = ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
 		} };
@@ -1000,7 +1002,7 @@ grape::PharmacyManager::OnGetPharmacyById(grape::request&& req, boost::urls::mat
 		auto&& [pid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
 		auto& id = boost::fusion::at_c<0>(pid);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT * FROM pharmacy WHERE pharamcy_id = ?;)");
+			R"(SELECT * FROM pharmacy WHERE pharmacy_id = ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
 		} };
@@ -1075,3 +1077,54 @@ grape::PharmacyManager::OnGetBranchAddress(pof::base::net_manager::req_t&& req, 
 	}
 }
 
+boost::asio::awaitable<grape::response> 
+grape::PharmacyManager::OnCheckPharmacyNameExists(grape::request&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try
+	{
+		std::string name = match["name"];
+
+		boost::trim(name);
+		boost::to_lower(name);
+
+		if (!(co_await CheckIfPharmacyExists(std::string(name))))
+		{
+			co_return app->mNetManager.not_found("Pharmacy does not exists");
+		}
+
+		co_return app->OkResult("Pharmacy exists");
+	}
+	catch (const std::exception& exp) 
+	{
+			spdlog::error(exp.what());
+			co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::PharmacyManager::OnCheckBranchNameExists(grape::request&& req, boost::urls::matches&& match) 
+{
+	auto app = grape::GetApp();
+	try 
+	{
+		std::string name = match["name"];
+		boost::trim(name);
+		boost::to_lower(name);
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [id, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
+		auto& i = boost::fusion::at_c<0>(id);
+
+		if (!(co_await  CheckIfBranchExists(std::string(name), i))) {
+			co_return app->mNetManager.not_found("Branch does not exists");
+		}
+
+		co_return app->OkResult("Branch exists");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}

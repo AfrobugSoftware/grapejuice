@@ -109,6 +109,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnDestroyPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetPharmacyAddress(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetPharmacyById(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnCheckPharmacyNameExists(grape::request&& req, boost::urls::matches&& match);
 
 
 		//branches
@@ -119,7 +120,8 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnOpenPharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnClosePharmacyBranch(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetBranchAddress(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		
+		boost::asio::awaitable<grape::response> OnCheckBranchNameExists(grape::request&& req, boost::urls::matches&& match);
+
 
 
 		//this is gonna be a very slow process

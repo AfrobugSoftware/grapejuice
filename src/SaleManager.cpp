@@ -22,14 +22,20 @@ void grape::SaleManager::CreateSaleTable()
 				branch_id binary(16),
 				sale_id binary(16),
 				product_id binary(16),
+				formulary_id binary(16),
 				sale_date datetime,
 				unit_cost_price binary(17),
 				unit_sale_price binary(17),
-				quantity integer,
 				total_amount binary(17),
-				payment_method integer, 
-				product_label text
+				quantity integer,
+				payment_method text, 
+				product_label text,
+				sale_state integer,
+				sale_add_info text
 			);)");
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto d = fut.get();
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
