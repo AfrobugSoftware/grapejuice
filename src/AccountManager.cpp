@@ -16,7 +16,7 @@ void grape::AccountManager::CreateAccountTable()
 	auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase);
 	query->m_sql = R"(CREATE TABLE IF NOT EXISTS accounts (
 		pharmacy_id binary(16),
-		account_id binary(16),
+		account_id binary(16) NOT NULL,
 		account_type integer,
 		privilage integer,
 		account_first_name text,
@@ -29,10 +29,9 @@ void grape::AccountManager::CreateAccountTable()
 		account_passhash text,
 		sec_question text,
 		sec_ans_hash text, 
-		signin_time datetime, 
-		signout_time datetime,
 		session_id binary(16),
-		session_start datetime
+		session_start datetime,
+		PRIMARY KEY (account_id)
 	);)"s;
 	auto fut = query->get_future();
 	app->mDatabase->push(query);
@@ -57,7 +56,7 @@ void grape::AccountManager::SetRoutes()
 	app->route("/account/signinfromsession", std::bind_front(&grape::AccountManager::OnSignInFromSession, this));
 	app->route("/account/updateaccount", std::bind_front(&grape::AccountManager::UpdateUserAccount, this));
 	app->route("/account/getpharmacyusers", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
-	app->route("/account/checkname/{name}", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
+	app->route("/account/checkname/{name}", std::bind_front(&grape::AccountManager::OnCheckUsernameExists, this));
 	app->route("/account/verifyuser", std::bind_front(&grape::AccountManager::OnVerifyUser, this));
 
 }
@@ -88,7 +87,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				account_date_of_birth,
 				phonenumber,
 				email,
-				regnumber
+				regnumber,
 				account_username,
 				account_passhash,
 				sec_question,
@@ -119,7 +118,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				boost::mysql::field(account.username),
 				boost::mysql::field(account.passhash.value()),
 				boost::mysql::field(sq),
-				boost::mysql::field(sa)
+				boost::mysql::field(bcrypt::generateHash(sa.data()))
 		};
 
 		try {
@@ -184,10 +183,40 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		std::string sql;
 		if (grape::VerifyEmail(account_cred.username)) {
-			sql = R"(SELECT * FROM accounts WHERE email = ? AND pharmacy_id = ?;)"s;
+			sql = R"(SELECT 
+				pharmacy_id,
+				account_id,
+				account_type,
+				privilage,
+				account_first_name,
+				account_last_name,
+				account_date_of_birth,
+				phonenumber,
+				email,
+				regnumber,
+				account_username,
+				account_passhash,
+				sec_question,
+				sec_ans_hash
+			 FROM accounts WHERE email = ? AND pharmacy_id = ?;)"s;
 		}
 		else {
-			sql = R"(SELECT * FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)"s;
+			sql = R"(SELECT 
+				pharmacy_id,
+				account_id,
+				account_type,
+				privilage,
+				account_first_name,
+				account_last_name,
+				account_date_of_birth,
+				phonenumber,
+				email,
+				regnumber,
+				account_username,
+				account_passhash,
+				sec_question,
+				sec_ans_hash
+			FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)"s;
 		}
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, std::move(sql));
@@ -230,18 +259,18 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			UPDATE accounts SET session_id = ?, session_start = ? WHERE account_username = ? AND account_id = ?;
 		)"s);
 
-		account.session_id.value() = boost::uuids::random_generator_mt19937{}();
-		auto tt = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(pof::base::data::clock_t::now());
+		account.session_id = boost::uuids::random_generator_mt19937{}();
+		account.session_start_time = pof::base::data::clock_t::now();
+		auto tt = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(account.session_start_time.value());
 		query->m_arguments = { {
 					boost::mysql::field(boost::mysql::blob(account.session_id.value().begin(), account.session_id.value().end())),
 					boost::mysql::field(boost::mysql::datetime(tt)),
 					boost::mysql::field(account.username),
 					boost::mysql::field(boost::mysql::blob(account.account_id.begin(), account.account_id.end()))
 		} };
-		query->m_waittime->expires_after(std::chrono::seconds(60));
-		fut = std::move(query->get_future());
-		app->mDatabase->push(query);
 
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
 		tried = app->mDatabase->push(query);
 		if (!tried) {
 			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
@@ -253,6 +282,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (ec != boost::asio::error::operation_aborted) {
 			co_return app->mNetManager.timeout_error();
 		}
+		fut = query->get_future();
 		auto d = fut.get();
 
 		//set session into active sessions

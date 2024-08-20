@@ -458,40 +458,33 @@ namespace grape
 			boost::fusion::for_each(range(), [&](auto i) {
 				using constant = std::decay_t<decltype(i)>;
 				using arg_type = std::decay_t<decltype(boost::fusion::at<constant>(ret))>;
+				if (i > row.size()) return;
 				if constexpr (grape::is_optional_field_set<arg_type>::value) {
 					//skip types with feild_set
 				}
+				/*
+				* Every optional is below the field set, the fusion struct is designed so that
+				* only optionals appear below a field set, well fusion structs that are inteaded to used
+				* the -1 is used to account for the optional field set
+				*/
 				else if constexpr (grape::is_optional_field<arg_type>::value) {
 					using get_type = typename arg_type::value_type;
-					if (boost::variant2::holds_alternative<get_type>(row[constant::value])) {
-						boost::fusion::at<constant>(ret).value() =
-							std::move(boost::variant2::get<get_type>(row[constant::value]));
-					}
+					boost::fusion::at<constant>(ret) = std::move(boost::variant2::get<get_type>(row[constant::value - 1]));	
 				}
 				else if constexpr (grape::is_bitset<arg_type>::value) {
-					std::uint32_t bits = boost::variant2::get<std::uint32_t>(row[constant::value]);
+					std::uint32_t bits = static_cast<std::uint32_t>(boost::variant2::get<std::int64_t>(row[constant::value]));
 					boost::fusion::at<constant>(ret) = arg_type{ bits };
 				}
 				else if constexpr (std::is_enum_v<arg_type>) {
-					using htype = std::underlying_type_t<arg_type>;
-					if (boost::variant2::holds_alternative<htype>(row[constant::value])) {
-						boost::fusion::at<constant>(ret) =
-							static_cast<arg_type>(std::move(boost::variant2::get<htype>(row[constant::value])));
-					}
+					boost::fusion::at<constant>(ret) =	static_cast<arg_type>(std::move(boost::variant2::get<std::int64_t>(row[constant::value])));
 				}
 				else if constexpr (std::is_same_v<std::chrono::year_month_day, arg_type>) {
-					if (boost::variant2::holds_alternative<pof::base::data::datetime_t>(row[constant::value])) {
-						auto& datetime = boost::variant2::get<pof::base::data::datetime_t>(row[constant::value]);
-						auto days = std::chrono::time_point_cast<std::chrono::sys_days::duration>(datetime);
-						boost::fusion::at<constant>(ret) =
-							std::chrono::year_month_day{ days };
-					}
+					auto& datetime = boost::variant2::get<pof::base::data::datetime_t>(row[constant::value]);
+					auto days = std::chrono::time_point_cast<std::chrono::sys_days::duration>(datetime);
+					boost::fusion::at<constant>(ret) =	std::chrono::year_month_day{ days };
 				}
 				else{
-					if (boost::variant2::holds_alternative<arg_type>(row[constant::value])) {
-						boost::fusion::at<constant>(ret) =
-							std::move(boost::variant2::get<arg_type>(row[constant::value]));
-					}
+					boost::fusion::at<constant>(ret) =std::move(boost::variant2::get<arg_type>(row[constant::value]));
 				}
 			});
 			return ret;
