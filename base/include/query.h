@@ -167,14 +167,30 @@ namespace pof {
 							for (const auto& m : meta)
 							{
 								auto k = m.type();
-								
+								//handle null columns here.
+									/*
+									* Note about null columns, for now only time, strings and uuid which is a binary time columns can be NULL,
+									* any other column type that is a null is considerd an error and should throw a bad value access exception
+								*/
 								switch (k)
 								{
+								case boost::mysql::column_type::tinyint:
+									v[i] = static_cast<std::uint8_t>(row.at(i).as_int64());
+									break;
 								case boost::mysql::column_type::int_:
 								case boost::mysql::column_type::bigint:
-								case boost::mysql::column_type::decimal:
-									v[i] = row.at(i).as_int64();
+								{
+									if (row.at(i).is_uint64())
+									{
+										v[i] = row.at(i).as_uint64();
+										datameta[i] = pof::base::data::kind::uint64;
+									}
+									else {
+										v[i] = row.at(i).as_int64();
+										datameta[i] = pof::base::data::kind::int64;
+									}
 									break;
+								}
 								case boost::mysql::column_type::float_:
 									v[i] = row.at(i).as_float();
 									break;
@@ -186,55 +202,79 @@ namespace pof {
 								case boost::mysql::column_type::varbinary:
 								case boost::mysql::column_type::blob:
 								{
-									auto bv = row.at(i).as_blob();
-									pof::base::data::blob_t blob;
-									blob.reserve(bv.size());
+									if (!row.at(i).is_null()) {
+										auto bv = row.at(i).as_blob();
+										pof::base::data::blob_t blob;
+										blob.reserve(bv.size());
 
-									std::ranges::copy(bv, std::back_inserter(blob));
-									v[i] = std::move(blob);
+										std::ranges::copy(bv, std::back_inserter(blob));
+										v[i] = std::move(blob);
+									}
+									else {
+										v[i] = pof::base::data::blob_t{};
+									}
 								}
 									break;
-
-								case boost::mysql::column_type::time:
 								case boost::mysql::column_type::date:
-								case boost::mysql::column_type::datetime:
+								{
+									v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
+										pof::base::data::clock_t::duration>(row.at(i).as_date().as_time_point())); // wrong type
+								}
+								break;
+								case boost::mysql::column_type::time:
+								{
+									v[i] = pof::base::data::datetime_t(std::chrono::duration_cast<
+										pof::base::data::clock_t::duration>(row.at(i).as_time())); // wrong type	
+								}
+								break;
 								case boost::mysql::column_type::timestamp:
-									v[i] = pof::base::data::datetime_t(row.at(i).as_datetime().as_time_point().time_since_epoch()); // wrong type
+									break;
+								case boost::mysql::column_type::datetime:
+									if (row.at(i).is_null()) {
+										v[i] = pof::base::data::datetime_t{};
+									}
+									else {
+										v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
+											pof::base::data::clock_t::duration>(row.at(i).as_datetime().as_time_point())); // wrong type
+									}
 									break;
 								case boost::mysql::column_type::binary:
 								{
-									//is char converted to blob or stirng
-									auto collect = row.at(i).as_blob();
-									const size_t size = collect.size();
-									switch (size)
-									{
-										//reserving 16 bytes fixed length for uuids
-									case 16:
-									{
-										boost::uuids::uuid uuid{};
-										std::copy(collect.begin(), collect.end(), uuid.begin());
-										v[i] = uuid;
-										datameta[i] = pof::base::data::kind::uuid;
+									if (row.at(i).is_null()) {
+										v[i] = boost::uuids::nil_uuid();
 									}
-									break;
-									//reserving 17 bytes fixed length for currency
-									case 17:
-									{
-										pof::base::currency cur;
-										std::ranges::copy(collect, cur.data().begin());
-										v[i] = cur;
-										datameta[i] = pof::base::data::kind::currency;
-									}
-									break;
-									default:
+									else {
+										//is char converted to blob or stirng
+										auto collect = row.at(i).as_blob();
+										const size_t size = collect.size();
+										switch (size)
+										{
+											//reserving 16 bytes fixed length for uuids
+										case 16:
+										{
+											boost::uuids::uuid uuid{};
+											std::copy(collect.begin(), collect.end(), uuid.begin());
+											v[i] = uuid;
+											datameta[i] = pof::base::data::kind::uuid;
+										}
 										break;
+										//reserving 17 bytes fixed length for currency
+										case 17:
+										{
+											pof::base::currency cur;
+											std::ranges::copy(collect, cur.data().begin());
+											v[i] = cur;
+											datameta[i] = pof::base::data::kind::currency;
+										}
+										break;
+										default:
+											break;
+										}
 									}
 								}
 								break;
 								case boost::mysql::column_type::varchar:
 								case boost::mysql::column_type::text:
-								case boost::mysql::column_type::enum_:
-								case boost::mysql::column_type::set:
 								case boost::mysql::column_type::json:
 									v[i] = pof::base::data::text_t(row.at(i).as_string());
 									break;
@@ -399,7 +439,6 @@ namespace pof {
 										break;
 									case boost::mysql::column_type::unknown:
 										datameta.push_back(pof::base::data::kind::null);
-										break;
 									default:
 										break;
 									}
@@ -407,8 +446,7 @@ namespace pof {
 							}
 
 							const auto& rows = result.rows();
-							if(base_t::m_data->empty())
-								base_t::m_data->reserve(rows.size());
+							if(base_t::m_data->empty()) base_t::m_data->reserve(rows.size());
 							for (const auto& row : rows) {
 								//copy data
 								size_t i = 0;
@@ -418,7 +456,11 @@ namespace pof {
 								for (const auto& m : meta)
 								{
 									auto k = m.type();
-
+									//handle null columns here.
+									/*
+									* Note about null columns, for now only time, strings and uuid which is a binary time columns can be NULL, 
+									* any other column type that is a null is considerd an error and should throw a bad value access exception
+									*/
 									switch (k)
 									{
 									case boost::mysql::column_type::tinyint:
@@ -451,64 +493,97 @@ namespace pof {
 									case boost::mysql::column_type::varbinary:
 									case boost::mysql::column_type::blob:
 									{
-										auto bv = row.at(i).as_blob();
-										pof::base::data::blob_t blob;
-										blob.reserve(bv.size());
+										if (!row.at(i).is_null()) {
+											auto bv = row.at(i).as_blob();
+											pof::base::data::blob_t blob;
+											blob.reserve(bv.size());
 
-										std::ranges::copy(bv, std::back_inserter(blob));
-										v[i] = std::move(blob);
+											std::ranges::copy(bv, std::back_inserter(blob));
+											v[i] = std::move(blob);
+										}
+										else {
+											v[i] = pof::base::data::blob_t{};
+										}
 									}
 									break;
 
 									case boost::mysql::column_type::date:
-									case boost::mysql::column_type::time:
-									case boost::mysql::column_type::datetime:
-									case boost::mysql::column_type::timestamp:
+									{
 										v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
-											pof::base::data::clock_t::duration>(row.at(i).as_datetime().as_time_point())); // wrong type
+											pof::base::data::clock_t::duration>(row.at(i).as_date().as_time_point())); // wrong type
+									}
+									break;
+									case boost::mysql::column_type::time:
+									{
+										v[i] = pof::base::data::datetime_t(std::chrono::duration_cast<
+											pof::base::data::clock_t::duration>(row.at(i).as_time())); // wrong type	
+									}
+									break;
+									case boost::mysql::column_type::timestamp:
+										break;
+									case boost::mysql::column_type::datetime:
+										if (row.at(i).is_null()) {
+											v[i] = pof::base::data::datetime_t{};
+										}
+										else {
+											v[i] = pof::base::data::datetime_t(std::chrono::time_point_cast<
+												pof::base::data::clock_t::duration>(row.at(i).as_datetime().as_time_point())); // wrong type
+										}
 										break;
 									case boost::mysql::column_type::binary:
 									{
-										auto collect = row.at(i).as_blob();
-										const size_t size = collect.size();
-										switch (size)
-										{
-										//reserving 16 bytes fixed length for uuids
-										case 16:
-										{
-											boost::uuids::uuid uuid{};
-											std::copy(collect.begin(), collect.end(), uuid.begin());
-											v[i] = uuid;
+										if (row.at(i).is_null()) {
+											//assume that the type is a uuid, because currency cannot be null !
+											v[i] = boost::uuids::nil_uuid();
 											datameta[i] = pof::base::data::kind::uuid;
 										}
+										else {
+											auto collect = row.at(i).as_blob();
+											const size_t size = collect.size();
+											switch (size)
+											{
+												//reserving 16 bytes fixed length for uuids
+											case 16:
+											{
+												boost::uuids::uuid uuid{};
+												std::copy(collect.begin(), collect.end(), uuid.begin());
+												v[i] = uuid;
+												datameta[i] = pof::base::data::kind::uuid;
+											}
 											break;
-										//reserving 17 bytes fixed length for currency
-										case 17:
-										{
-											pof::base::currency cur;
-											std::ranges::copy(collect, cur.data().begin());
-											v[i] = cur;
-											datameta[i] = pof::base::data::kind::currency;
-										}
+											//reserving 17 bytes fixed length for currency
+											case 17:
+											{
+												pof::base::currency cur;
+												std::ranges::copy(collect, cur.data().begin());
+												v[i] = cur;
+												datameta[i] = pof::base::data::kind::currency;
+											}
 											break;
-										default:
-											break;
+											default:
+												break;
+											}
 										}
 									}
 									break;
 									case boost::mysql::column_type::varchar:
 									case boost::mysql::column_type::text:
-									//case boost::mysql::column_type::enum_:
-									//case boost::mysql::column_type::set:
 									case boost::mysql::column_type::json:
-										v[i] = pof::base::data::text_t(row.at(i).as_string());
+										if (!row.at(i).is_null()) {
+											v[i] = pof::base::data::text_t(row.at(i).as_string());
+										}
+										else {
+											v[i] = pof::base::data::text_t{};
+										}
 										break;
 									case boost::mysql::column_type::unknown:
 										break;
 									default:
 										break;
 									}
+									
 									i++; //next column
+								
 								}
 								base_t::m_data->emplace(std::move(v));
 							}

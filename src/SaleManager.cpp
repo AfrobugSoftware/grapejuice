@@ -26,6 +26,7 @@ void grape::SaleManager::CreateSaleTable()
 				sale_date datetime,
 				unit_cost_price binary(17),
 				unit_sale_price binary(17),
+				discount binary(17),
 				total_amount binary(17),
 				quantity integer,
 				payment_method text, 
@@ -38,6 +39,7 @@ void grape::SaleManager::CreateSaleTable()
 		auto d = fut.get();
 	}
 	catch (const std::exception& exp) {
+		
 		spdlog::error(exp.what());
 	}
 }

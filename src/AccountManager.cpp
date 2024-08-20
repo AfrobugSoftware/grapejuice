@@ -24,6 +24,7 @@ void grape::AccountManager::CreateAccountTable()
 		account_date_of_birth date,
 		phonenumber text,
 		email text,
+		regnumber text,
 		account_username text,
 		account_passhash text,
 		sec_question text,
@@ -53,9 +54,11 @@ void grape::AccountManager::SetRoutes()
 	app->route("/account/signup", std::bind_front(&grape::AccountManager::OnSignUp, this));
 	app->route("/account/signin", std::bind_front(&grape::AccountManager::OnSignIn, this));
 	app->route("/account/signout", std::bind_front(&grape::AccountManager::OnSignOut, this));
+	app->route("/account/signinfromsession", std::bind_front(&grape::AccountManager::OnSignInFromSession, this));
 	app->route("/account/updateaccount", std::bind_front(&grape::AccountManager::UpdateUserAccount, this));
 	app->route("/account/getpharmacyusers", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
 	app->route("/account/checkname/{name}", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
+	app->route("/account/verifyuser", std::bind_front(&grape::AccountManager::OnVerifyUser, this));
 
 }
 
@@ -85,10 +88,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				account_date_of_birth,
 				phonenumber,
 				email,
+				regnumber
 				account_username,
 				account_passhash,
 				sec_question,
-				sec_ans_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
+				sec_ans_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		std::vector<boost::mysql::field> args;
 
 		std::string_view sq, sa;
@@ -107,10 +111,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				boost::mysql::field(account.privilage.to_ullong()),
 				boost::mysql::field(account.first_name),
 				boost::mysql::field(account.last_name),
-				boost::mysql::field(boost::mysql::date((std::int32_t)account.dob.year(), 
+				boost::mysql::field(boost::mysql::date((std::int32_t)account.dob.year(),
 					(std::uint32_t)account.dob.month(), (std::uint32_t)account.dob.day())),
 				boost::mysql::field(account.phonenumber),
 				boost::mysql::field(account.email),
+				boost::mysql::field(account.regnumber),
 				boost::mysql::field(account.username),
 				boost::mysql::field(account.passhash.value()),
 				boost::mysql::field(sq),
@@ -253,11 +258,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		//set session into active sessions
 		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
 
-		grape::session_cred sc;
-		sc.session_start_time = account.session_start_time.value();
-		sc.session_id = account.session_id.value();
-
-		co_return app->OkResult(sc, req.keep_alive());
+		co_return app->OkResult(account, req.keep_alive());
 	}
 	catch (std::exception& err) {
 		co_return app->mNetManager.server_error(err.what());
@@ -326,7 +327,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::put) {
+		if (req.method() != http::verb::post) {
 			co_return app->mNetManager.bad_request("get method expected");
 		}
 		if(!req.has_content_length()){
@@ -334,20 +335,22 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		auto& body = req.body();
-		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
-
-		if (!(VerifySession(cred.account_id, cred.session_id) && IsUser(cred.account_id, cred.pharm_id))) {
-			co_return app->mNetManager.auth_error("Account not authorised");
+		auto&& [cred, buf] = grape::serial::read<grape::session_cred>(boost::asio::buffer(body));
+		if (cred.session_start_time + mSessionDuration <= std::chrono::system_clock::now()) {
+			co_return app->mNetManager.auth_error("Session time out");
 		}
-			
+
+
 		//increase timeout ?
 		auto session_time = pof::base::data::clock_t::now();		
-		
 		//get account for the session
 		grape::account account;
-		mActiveSessions.visit(cred.session_id, [&](auto& v) {
+		auto found = mActiveSessions.visit(cred.session_id, [&](auto& v) {
 			account = v.second;
 		});
+		if (!found) {
+			co_return app->mNetManager.auth_error("Session time out");
+		}
 
 		//change the session_id
 		account.session_id.value() = boost::uuids::random_generator_mt19937{}();
@@ -382,7 +385,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		mActiveSessions.erase(cred.session_id);
 		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
 
-		co_return app->OkResult("Account signed in from session");
+		co_return app->OkResult(account, req.keep_alive());
 	}
 	catch (const std::exception& err) {
 		co_return app->mNetManager.server_error(err.what());
@@ -479,14 +482,15 @@ bool grape::AccountManager::VerifySession(const boost::uuids::uuid& aid, const b
 }
 
 boost::asio::awaitable<bool>
-	grape::AccountManager::CheckUsername(const std::string& username)
+	grape::AccountManager::CheckUsername(const std::string& username,const boost::uuids::uuid& pharmid)
 {
 	auto app = grape::GetApp();
 	try {
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(
-			SELECT 1 FROM accounts WHERE account_username = ?;
+			SELECT 1 FROM accounts WHERE account_username = ? AND pharmacy_id = ?;
 		)");
-		query->m_arguments = { {boost::mysql::field(username)} };
+		query->m_arguments = { {boost::mysql::field(username),
+			boost::mysql::field(boost::mysql::blob(pharmid.begin(), pharmid.end())) } };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
 		query->m_waittime->expires_after(std::chrono::seconds(1));
 
@@ -598,7 +602,11 @@ grape::AccountManager::OnCheckUsernameExists(pof::base::net_manager::req_t&& req
 
 		boost::trim(name);
 		boost::to_lower(name);
-		if (!(co_await CheckUsername(name))) {
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected an argument"s);
+
+		auto&& [pid, buf] = grape::serial::read<grape::uid_t>(boost::asio::buffer(body));
+		if (!(co_await CheckUsername(name, boost::fusion::at_c<0>(pid)))) {
 			co_return app->mNetManager.not_found("username does not exisits");
 		}
 
@@ -608,3 +616,53 @@ grape::AccountManager::OnCheckUsernameExists(pof::base::net_manager::req_t&& req
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::AccountManager::OnVerifyUser(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		auto& body = req.body();
+		if (body.empty()) throw std::logic_error("expected a body");
+		grape::account_cred cred;
+		auto&& [v, buf] = grape::serial::read<grape::account_cred>(boost::asio::buffer(body));
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT a.type, a.username, a.passhash FROM accounts a WHERE a.pharmacy_id = ? AND a.username = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<0>(v).begin(),  boost::fusion::at_c<0>(v).end())),
+			boost::mysql::field(boost::fusion::at_c<2>(v))
+		} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(1));
+
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted || pushed == false) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Account not found");
+
+		using r_type = boost::fusion::vector<
+			account_type,
+			std::string,
+			std::string
+		>;
+
+		r_type s = serial::build<r_type>(data->begin()->first);
+		if (boost::fusion::at_c<0>(s) > boost::fusion::at_c<1>(v) || 
+			!bcrypt::validatePassword(boost::fusion::at_c<3>(v), boost::fusion::at_c<2>(s))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		co_return app->OkResult("verified", req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+

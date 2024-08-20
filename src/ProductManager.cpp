@@ -264,6 +264,7 @@ void grape::ProductManager::CreateFormularyTable() {
 				created_by text,
 				created_date datetime,
 				version text,
+				usage_count integer,
 				access_level integer
 		);)");
 		auto fut = query->get_future();
@@ -382,10 +383,10 @@ void grape::ProductManager::SetRoutes()
 	auto app = grape::GetApp();
 	app->route("/product/add"s, std::bind_front(&grape::ProductManager::OnAddProduct, this));
 	app->route("/product/update"s, std::bind_front(&grape::ProductManager::OnUpdateProduct, this));
-	app->route("/product/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
-	app->route("/product/removeproducts"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
-	app->route("/product/addproducts"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
-	app->route("/product/updatepharmaproduct"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
+	app->route("/product/get"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
+	app->route("/product/remove"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
+	app->route("/product/addpharma"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
+	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
 
 	app->route("/product/formulary/add"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/formulary/remove", std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
@@ -623,10 +624,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 	auto app = grape::GetApp();
 	try {
 		if (req.method() != http::verb::get) {
-			co_return app->mNetManager.bad_request("Get method expected");
+			co_return app->mNetManager.bad_request("get method expected");
 		}
 		auto& body = req.body();
-		if (body.empty()) throw std::invalid_argument("Requires an argument");
+		if (body.empty()) throw std::invalid_argument("requires an argument");
 
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
 		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
@@ -636,6 +637,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT * FROM (SELECT p.id,
+				f.formulary_id,
 				p.serial_num,
 				p.name,
 				p.generic_name,
@@ -656,6 +658,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 	   FROM products p
 	   INNER JOIN pharma_products pp
 	   ON p.id = pp.product_id
+	   INNER JOIN formulary_content f
+	   ON pp.product_id = f.product_id
        WHERE pp.pharmacy_id = ? AND pp.branch_id = ?) AS sub
 	   HAVING row_id BETWEEN ? AND ?;)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
@@ -683,11 +687,27 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		if (data->empty()) {
 			co_return app->mNetManager.not_found("No products for pharmacy");
 		}
-		using vector_type = boost::fusion::vector<boost::uuids::uuid, std::uint64_t,
-			std::string, std::string, std::string, std::string, std::string, std::string, std::string, pof::base::currency,
-			pof::base::currency, std::uint64_t, std::uint64_t, std::string, std::string, std::uint64_t, std::uint64_t>;
+		using vector_type = boost::fusion::vector<
+			boost::uuids::uuid, 
+			boost::uuids::uuid, 
+			std::uint64_t,
+			std::string, 
+			std::string, 
+			std::string, 
+			std::string, 
+			std::string, 
+			std::string, 
+			std::string, 
+			pof::base::currency,
+			pof::base::currency, 
+			std::uint64_t, 
+			std::uint64_t, 
+			std::string, 
+			std::string, 
+			std::uint64_t, 
+			std::uint64_t>;
 		
-		boost::fusion::vector<std::vector<vector_type>> ret;
+		grape::collection_type<vector_type> ret;
 		auto& group = boost::fusion::at_c<0>(ret);
 	
 
@@ -704,16 +724,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		grape::response::body_type::value_type value(size, 0x00);
 		grape::serial::write(boost::asio::buffer(value), ret);
 
-		grape::response res{ http::status::ok, 11 };
-		res.set(http::field::server, USER_AGENT_STRING);
-		res.set(http::field::content_type, "application/octet-stream");
-		res.keep_alive(req.keep_alive());
-		res.body() = std::move(value);
-		res.prepare_payload();
-		co_return res;
-	}
-	catch (const std::logic_error& err) {
-		co_return app->mNetManager.bad_request(err.what());
+		co_return app->OkResult(ret, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());

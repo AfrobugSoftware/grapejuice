@@ -18,7 +18,7 @@ namespace grape {
 	using opt_sessionid = grape::optional_field<boost::uuids::uuid, 3>;
 	using opt_session_start_time = grape::optional_field<std::chrono::system_clock::time_point, 4>;
 
-
+	//decresing privilage
 	enum class account_type : std::uint32_t {
 		pharmacist,
 		loccum_pharmacist,
@@ -42,6 +42,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::chrono::year_month_day , dob)
 	(std::string, phonenumber)
 	(std::string, email)
+	(std::string, regnumber)
 	(std::string, username)
 	(grape::opt_fields, fields)
 	(grape::opt_hash, passhash)
@@ -61,6 +62,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), account_cred,
 	(boost::uuids::uuid, pharmacy_id)
+	(grape::account_type, type)
 	(std::string, username)
 	(std::string, password)
 	(std::chrono::system_clock::time_point, last_session_time)
@@ -78,9 +80,9 @@ namespace grape
 	class AccountManager : public boost::noncopyable {
 	public:
 		//account type
-		enum : std::uint8_t {
-			ACCOUNT_PHARMACY = 0x01,
-			ACCOUNT_INSTITUTION = 0x02,
+		enum class insitution_type : std::uint32_t {
+			hospital,
+			insurrance,
 		};
 
 		AccountManager();
@@ -92,19 +94,17 @@ namespace grape
 
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignUp(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignIn(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignOut(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignInFromSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-
 		boost::asio::awaitable<pof::base::net_manager::res_t> GetActiveSession(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		boost::asio::awaitable<pof::base::net_manager::res_t> UpdateUserAccount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> GetUsersForPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCheckUsernameExists(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnVerifyUser(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		bool VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid);
-		boost::asio::awaitable<bool> CheckUsername(const std::string& username);
+		boost::asio::awaitable<bool> CheckUsername(const std::string& username, const boost::uuids::uuid& pharmid);
 		boost::asio::awaitable<void> UpdateSessions();
 
 		bool CheckUserPrivilage(const boost::uuids::uuid& user, grape::account_type atype) const;
