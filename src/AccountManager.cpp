@@ -58,6 +58,9 @@ void grape::AccountManager::SetRoutes()
 	app->route("/account/getpharmacyusers", std::bind_front(&grape::AccountManager::GetUsersForPharmacy, this));
 	app->route("/account/checkname/{name}", std::bind_front(&grape::AccountManager::OnCheckUsernameExists, this));
 	app->route("/account/verifyuser", std::bind_front(&grape::AccountManager::OnVerifyUser, this));
+	app->route("/account/getsecque", std::bind_front(&grape::AccountManager::OnGetSecurityQuestion, this));
+	app->route("/account/verifysecque", std::bind_front(&grape::AccountManager::OnVerifySecurityQuestion, this));
+	app->route("/account/passreset", std::bind_front(&grape::AccountManager::OnResetPassword, this));
 
 }
 
@@ -286,7 +289,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto d = fut.get();
 
 		//set session into active sessions
-		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
+		mActiveSessions.emplace(std::make_pair(account.account_id, account));
 
 		co_return app->OkResult(account, req.keep_alive());
 	}
@@ -522,7 +525,7 @@ boost::asio::awaitable<bool>
 		query->m_arguments = { {boost::mysql::field(username),
 			boost::mysql::field(boost::mysql::blob(pharmid.begin(), pharmid.end())) } };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(1));
+		query->m_waittime->expires_after(std::chrono::seconds(60));
 
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -554,7 +557,7 @@ boost::asio::awaitable<void>
 			auto nullid = boost::uuids::nil_uuid();
 			query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))} };
 			query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-			query->m_waittime->expires_after(std::chrono::seconds(1));
+			query->m_waittime->expires_after(std::chrono::seconds(60));
 
 			auto fut = query->get_future();
 			bool pushed = app->mDatabase->push(query);
@@ -607,7 +610,7 @@ bool grape::AccountManager::IsUser(const boost::uuids::uuid& accountID, const bo
 			user = v.second;
 		});
 	if (!found || !user.has_value()) return false;
-	return (user->account_id == id);
+	return (user->pharmacy_id == id);
 }
 
 bool grape::AccountManager::CheckUserPrivilage(const boost::uuids::uuid& userID, grape::account_type atype) const
@@ -663,7 +666,7 @@ grape::AccountManager::OnVerifyUser(pof::base::net_manager::req_t&& req, boost::
 			boost::mysql::field(boost::fusion::at_c<2>(v))
 		} };
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(1));
+		query->m_waittime->expires_after(std::chrono::seconds(60));
 
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -695,4 +698,174 @@ grape::AccountManager::OnVerifyUser(pof::base::net_manager::req_t&& req, boost::
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::AccountManager::OnGetSecurityQuestion(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get) {
+			co_return app->mNetManager.bad_request("expected a get method");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [ac, buf] = grape::serial::read<grape::account_cred>(boost::asio::buffer(body));
+		boost::trim(ac.username);
+		boost::to_lower(ac.username);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT sec_question FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)");
+		query->m_arguments = { {
+				boost::mysql::field(ac.username),
+				boost::mysql::field(boost::mysql::blob(ac.pharmacy_id.begin(), ac.pharmacy_id.end()))
+			} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted || pushed == false) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Account not found");
+		grape::string_t ret;
+		boost::fusion::at_c<0>(ret) = boost::variant2::get<std::string>((*data)[0].first[0]);
+
+
+		co_return app->OkResult(ret, req.keep_alive());
+
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::AccountManager::OnVerifySecurityQuestion(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("expected a post method");
+		}
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [ans, bu] = grape::serial::read<grape::account_cred>(boost::asio::buffer(body));
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT sec_ans_hash FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)");
+		query->m_arguments = { {
+				boost::mysql::field(ans.username),
+				boost::mysql::field(boost::mysql::blob(ans.pharmacy_id.begin(), ans.pharmacy_id.end()))
+			} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted || pushed == false) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		auto data = fut.get();
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Account not found");
+
+		std::string ret = boost::variant2::get<std::string>((*data)[0].first[0]);
+		if (!bcrypt::validatePassword(ans.password, ret)) {
+			co_return app->mNetManager.auth_error("Cannot authorise a password change");
+		}
+
+		co_return app->OkResult("Authorise a password change");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+
+boost::asio::awaitable<pof::base::net_manager::res_t>
+grape::AccountManager::OnResetPassword(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("expected a post method");
+		}
+		auto body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [ans, bu] = grape::serial::read<grape::account_cred>(boost::asio::buffer(body));
+		size_t pos = ans.password.find_first_of("-");
+		if (pos == std::string::npos) {
+			co_return app->mNetManager.auth_error("Invalid password reset");
+		}
+		
+		//validdate the reset is from a security question
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT sec_ans_hash FROM accounts WHERE account_username = ? AND pharmacy_id = ?;)");
+		query->m_hold_connection = true;
+		query->m_arguments = { {
+				boost::mysql::field(ans.username),
+				boost::mysql::field(boost::mysql::blob(ans.pharmacy_id.begin(), ans.pharmacy_id.end()))
+			} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		auto&& [ec] = co_await query->m_waittime->async_wait();
+		if (ec != boost::asio::error::operation_aborted || pushed == false) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		auto d = fut.get();
+		if (!d || d->empty()) {
+			co_return app->mNetManager.not_found("Account not found");
+		}
+
+		std::string ret = boost::variant2::get<std::string>((*d)[0].first[0]);
+		if (!bcrypt::validatePassword(ans.password.substr(pos + 1), ret)) {
+			co_return app->mNetManager.auth_error("Cannot authorise a password change");
+		}
+
+		//update the password
+		query->m_arguments.clear();
+		ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+		
+
+		std::string hash = bcrypt::generateHash(ans.password.substr(0, pos));
+		query->m_sql = R"(UPDATE accounts SET account_passhash = ? WHERE account_username = ? AND pharmacy_id = ?;)";
+		query->m_promise = {};
+		query->m_arguments = { {
+				boost::mysql::field(hash),
+				boost::mysql::field(ans.username),
+				boost::mysql::field(boost::mysql::blob(ans.pharmacy_id.begin(), ans.pharmacy_id.end()))
+			} };
+		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+		query->m_waittime->expires_after(std::chrono::seconds(60));
+
+		fut = query->get_future();
+		pushed = app->mDatabase->push(query);
+		auto&& [ec2] = co_await query->m_waittime->async_wait();
+		if (ec2 != boost::asio::error::operation_aborted || pushed == false) {
+			throw std::system_error(std::make_error_code(std::errc::timed_out));
+		}
+
+		(void)fut.get();
+
+
+		query->unborrow();
+		co_return app->OkResult("Password updated");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 

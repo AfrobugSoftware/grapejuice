@@ -102,6 +102,9 @@ namespace grape
 		boost::asio::awaitable<pof::base::net_manager::res_t> GetUsersForPharmacy(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCheckUsernameExists(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnVerifyUser(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetSecurityQuestion(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnVerifySecurityQuestion(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnResetPassword(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		bool VerifySession(const boost::uuids::uuid& aid, const boost::uuids::uuid& sid);
 		boost::asio::awaitable<bool> CheckUsername(const std::string& username, const boost::uuids::uuid& pharmid);

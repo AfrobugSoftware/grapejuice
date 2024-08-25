@@ -55,10 +55,11 @@ namespace pof {
 			}
 
 
+			//unborrow should not reset the connection
+			//allow the shared_ptr handle clean up on destruction of the query connection
 			void unborrow() {
 				if (m_connection) {
 					m_manager->unborrow(m_connection);
-					m_connection.reset();
 				}
 			}
 
@@ -316,6 +317,7 @@ namespace pof {
 				boost::system::error_code ec;
 				if (stmt.valid()) {
 					std::tie(ec) =  co_await base_t::m_connection->async_close_statement(stmt, base_t::tuple_awaitable);
+					stmt = {};
 				}
 				co_return ec;
 			}
@@ -439,6 +441,7 @@ namespace pof {
 										break;
 									case boost::mysql::column_type::unknown:
 										datameta.push_back(pof::base::data::kind::null);
+										break;
 									default:
 										break;
 									}

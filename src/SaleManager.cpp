@@ -20,7 +20,7 @@ void grape::SaleManager::CreateSaleTable()
 			R"(CREATE TABLE IF NOT EXISTS sales  (
 				pharmacy_id binary(16),
 				branch_id binary(16),
-				sale_id binary(16),
+				sale_id binary(16) NOT NULL,
 				product_id binary(16),
 				formulary_id binary(16),
 				sale_date datetime,
@@ -32,7 +32,8 @@ void grape::SaleManager::CreateSaleTable()
 				payment_method text, 
 				product_label text,
 				sale_state integer,
-				sale_add_info text
+				sale_add_info text,
+				PRIMARY KEY (sale_id)
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);

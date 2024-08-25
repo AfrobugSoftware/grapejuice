@@ -19,6 +19,9 @@
 #include <type_traits>
 #include <bit>
 #include <bitset>
+#include <exception>
+
+#define CHECK_SIZE( s, buf ) if( s > buf.size() ) throw std::logic_error("error in read");
 
 namespace grape
 {
@@ -94,6 +97,7 @@ namespace grape
 			
 			template<Integers T>
 			void operator()(T& i) const {
+				CHECK_SIZE(sizeof(T), buf_)
 				i = bswap(*boost::asio::buffer_cast<const T*>(buf_));
 				buf_ += sizeof(T);
 			}
@@ -101,6 +105,7 @@ namespace grape
 			template<Enums E>
 			void operator()(E& e) const {
 				typename std::underlying_type<E>::type v;
+				CHECK_SIZE(sizeof(v), buf_)
 				(*this)(v);
 				e = static_cast<E>(v);
 			}
@@ -130,11 +135,14 @@ namespace grape
 			void operator()(std::string_view& v) const {
 				std::uint32_t len = 0;
 				(*this)(len);
+				CHECK_SIZE(len, buf_)
 				v = std::string_view(boost::asio::buffer_cast<const char*>(buf_), len);
 				buf_ += len;
 			}
 
 			void operator()(std::chrono::year_month_day& ymd) const {
+				CHECK_SIZE(sizeof std::uint32_t, buf_)
+
 				const std::uint32_t i = bswap(*boost::asio::buffer_cast<const std::uint32_t*>(buf_));
 				const short y = (i & 0xFFFF0000) >> 16;
 				const char m =  (i & 0x0000FF00) >> 8;
@@ -145,6 +153,8 @@ namespace grape
 			}
 
 			void operator()(std::chrono::system_clock::time_point& tp) const {
+				CHECK_SIZE(sizeof std::chrono::system_clock::rep, buf_)
+
 				tp = std::chrono::system_clock::time_point{
 					std::chrono::system_clock::duration{
 					bswap(*boost::asio::buffer_cast<const std::chrono::system_clock::rep*>(buf_))}};
@@ -152,30 +162,39 @@ namespace grape
 			}
 
 			void operator()(boost::uuids::uuid& uuid) const {
-				memcpy(uuid.data, buf_.data(), uuid.static_size());
+				CHECK_SIZE(uuid.static_size(), buf_);
+				std::copy(reinterpret_cast<const std::uint8_t*>(buf_.data()), 
+					reinterpret_cast<const std::uint8_t*>(buf_.data()) + uuid.static_size(), uuid.begin());;
 				buf_ += uuid.static_size();
 			}
 
 			void operator()(std::string& str) const {
 				std::uint32_t len = 0;
 				(*this)(len);
+
+				CHECK_SIZE(len, buf_)
 				str = std::string(reinterpret_cast<const char*>(buf_.data()), len);
 				buf_ += len;
 			}	
 
 			void operator()(pof::base::currency& cur) const {
-				memcpy(cur.data().data(), buf_.data(), cur.data().size());
+				CHECK_SIZE(cur.data().size(), buf_)
+					std::copy(reinterpret_cast<const std::uint8_t*>(buf_.data()),
+						reinterpret_cast<const std::uint8_t*>(buf_.data()) + cur.data().size(), cur.data().begin());
 				buf_ += cur.data().size();
 			}
 			template<Pods P>
 			void operator()(P& p) const {
+				CHECK_SIZE(sizeof P, buf_)
 				memcpy(&p, buf_.data(), sizeof(P));
 				buf_ += sizeof(P);
 			}
 
 			template<size_t N>
 			void operator()(std::array<char, N>& fixed) const {
-				memcpy(fixed.data(), buf_.data(), N);
+				CHECK_SIZE(N, buf_)
+				std::copy(reinterpret_cast<const std::uint8_t*>(buf_.data()),
+					reinterpret_cast<const std::uint8_t*>(buf_.data()) + N, fixed.begin());
 				buf_ += N;
 			}
 
@@ -210,6 +229,7 @@ namespace grape
 				(*this)(len);
 				vec.reserve(len);
 				if constexpr (std::is_integral_v<T>) {
+					CHECK_SIZE(len * sizeof T, buf_)
 					std::copy(reinterpret_cast<T*>(buf_.data()),
 						reinterpret_cast<T*>(buf_.data()) + len, vec.begin());
 				}
@@ -350,6 +370,7 @@ namespace grape
 		class sizer {
 		public:
 			mutable size_t size = 0;
+			constexpr sizer() {}
 
 			template<Integers T>
 			constexpr void operator()(const T& i) const {
@@ -581,7 +602,7 @@ namespace grape
 
 		template<typename T>
 			requires FusionStruct<T>
-		size_t get_size(const T& val) {
+		constexpr size_t get_size(const T& val) {
 			sizer s{};
 			boost::fusion::for_each(val, [&](const auto& i) {
 				s(i);
