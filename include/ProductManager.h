@@ -303,6 +303,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnLoadFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnCheckFormularyName(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetAttachedFormulary(grape::request&& req, boost::urls::matches&& match);
 
 
 		//category

@@ -322,6 +322,10 @@ namespace pof {
 				co_return ec;
 			}
 
+			void sclose() {
+				if (stmt.valid()) base_t::m_connection->close_statement(stmt);
+			}
+
 			virtual ~querystmt() {
 				if(stmt.valid()) base_t::m_connection->close_statement(stmt); //blocks might be a bottle neck
 			}

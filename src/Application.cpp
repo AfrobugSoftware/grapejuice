@@ -407,6 +407,26 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onGetO
 	}
 }
 
+boost::asio::awaitable<std::shared_ptr<pof::base::data>> grape::Application::run_query(std::shared_ptr<pof::base::dataquerybase> query)
+{
+	query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
+	query->m_waittime->expires_after(60s);
+	auto fut = query->get_future();
+	bool tried = app->mDatabase->push(query);
+	if (!tried) {
+		tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+		if (!tried) {
+			throw std::logic_error("error in query");
+		}
+	}
+	auto&& [ec] = co_await query->m_waittime->async_wait();
+	if (ec != boost::asio::error::operation_aborted) {
+		throw std::system_error(ec);
+	}
+
+	co_return fut.get();
+}
+
 boost::asio::awaitable<void> grape::Application::RunUpdateTimer()
 {
 	try {
