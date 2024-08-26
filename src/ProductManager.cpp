@@ -408,13 +408,14 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/addpharma"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
 
-	app->route("/product/formulary/add"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
+	app->route("/product/formulary/create"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/formulary/remove", std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
 	app->route("/product/formulary/get", std::bind_front(&grape::ProductManager::OnGetFormulary, this));
 	app->route("/product/formulary/getproducts", std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
 	app->route("/product/formulary/getformularyproducts", std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
 	app->route("/product/formulary/load", std::bind_front(&grape::ProductManager::OnLoadFormulary, this));
 	app->route("/product/formulary/checkname/{name}", std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
+	app->route("/product/formulary/hasformulary", std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
 
 	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
@@ -453,11 +454,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::put) {
-			co_return app->mNetManager.bad_request("Put method expected");
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("post method expected");
 		}
 		if (!req.has_content_length()) {
-			co_return app->mNetManager.bad_request("Expected a body");
+			co_return app->mNetManager.bad_request("expected a body");
 		}
 		auto& body = req.body();
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
@@ -480,10 +481,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				strength_type,
 				usage_info,
 				description,
+				indications,
 				package_size,
 				sideeffects,
 				barcode,
-				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?);)");
+				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)");
 		query->m_hold_connection;
 		query->m_arguments.resize(products.group.size());
 		for (size_t i = 0; i < products.group.size(); i++) {
@@ -491,16 +493,16 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			arg.reserve(19);
 			auto& prod = products.group[i];
 
-
 			arg.emplace_back(boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())));
 			arg.emplace_back(boost::mysql::field(prod.serial_num)); //product serial number
+
 			
 			boost::trim(prod.name);
-			std::transform(prod.name.begin(), prod.name.end(), prod.name.begin(), [](char c) -> char {return std::tolower(c); });
+			boost::to_lower(prod.name);
 			arg.emplace_back(boost::mysql::field(prod.name)); 
 			
 			boost::trim(prod.generic_name);
-			std::ranges::transform(prod.generic_name, prod.generic_name.begin(), [](char c) -> char {return std::tolower(c);  });
+			boost::to_lower(prod.generic_name);
 			arg.emplace_back(boost::mysql::field(prod.generic_name)); //generic name
 
 			arg.emplace_back(boost::mysql::field(prod.class_)); //class OTC, POM, P
@@ -517,7 +519,6 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 		co_await app->run_query(query);
 
-		//update the password
 		query->m_arguments.clear();
 		auto ec = co_await query->close();
 		if (ec) throw std::system_error(ec);
@@ -1037,11 +1038,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnA
 {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::put) {
-			co_return app->mNetManager.bad_request("Put method expected");
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("post method expected");
 		}
 		if (!req.has_content_length()) {
-			co_return app->mNetManager.bad_request("Expected a body");
+			co_return app->mNetManager.bad_request("expected a body");
 		}
 
 		auto& body = req.body();
@@ -1052,8 +1053,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnA
 		}
 
 		auto&& [pp, buf2] = grape::serial::read<grape::pharma_product>(buf);
+		pp.date_added = std::chrono::system_clock::now();
+
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(INSERT INTO pharma_product VALUES (?,?,?,?,?,?,?,?,?,?);)");
+			R"(INSERT INTO pharma_products VALUES (?,?,?,?,?,?,?,?,?,?);)");
 
 		query->m_arguments = { {
 				grape::serial::make_mysql_arg(pp)
@@ -1086,10 +1089,9 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 grape::ProductManager::OnCreateFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
-	thread_local static boost::uuids::random_generator_mt19937 uuidGen{};
 	try{
-		if (req.method() != http::verb::get) {
-			co_return app->mNetManager.bad_request("Get method expected");
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("post method expected");
 		}
 		auto& body = req.body();
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
@@ -1098,9 +1100,9 @@ grape::ProductManager::OnCreateFormulary(pof::base::net_manager::req_t&& req, bo
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 		auto&& [form, buf2] = grape::serial::read<grape::formulary>(buf);
-		form.id = uuidGen();
+		form.created_date = std::chrono::system_clock::now();
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(INSERT INTO formulary VALUES (?,?,?,?,?,?,?);)");
+			R"(INSERT INTO formulary VALUES (?,?,?,?,?,?,?,?);)");
 		query->m_hold_connection = true;
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
@@ -1109,6 +1111,7 @@ grape::ProductManager::OnCreateFormulary(pof::base::net_manager::req_t&& req, bo
 			boost::mysql::field(form.created_by),
 			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(form.created_date))),
 			boost::mysql::field(form.version),
+			boost::mysql::field(form.usage_count),
 			boost::mysql::field(static_cast<std::underlying_type_t<grape::formulary_access_level>>(form.access_level))
 		}};
 
@@ -1133,7 +1136,7 @@ grape::ProductManager::OnCreateFormulary(pof::base::net_manager::req_t&& req, bo
 		ec = co_await query->close();
 		if (ec) throw std::system_error(ec);
 
-		query->m_sql = R"(INSERT IN pharmacy_formulary VALUES (?,?);)"s;
+		query->m_sql = R"(INSERT INTO pharmacy_formulary VALUES (?,?);)"s;
 		query->m_promise = {};
 		query->m_arguments = { {
 				boost::mysql::field(boost::mysql::blob(form.id.begin(), form.id.end())),
@@ -3766,5 +3769,42 @@ grape::ProductManager::OnGetAttachedFormulary(grape::request&& req, boost::urls:
 		co_return app->mNetManager.server_error(exp.what());
 	}
 
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnCheckHasFormulary(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get method");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT f.id FROM formulary f WHERE f.creator_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
+		} };
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No formulary for pharmacy");
+
+		grape::uid_t retid;
+		boost::fusion::at_c<0>(retid) = (boost::variant2::get<boost::uuids::uuid>((*data->begin()).first[0]));
+
+		co_return app->OkResult(retid, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
 }
 

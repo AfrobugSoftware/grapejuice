@@ -289,8 +289,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		auto d = fut.get();
 
 		//set session into active sessions
-		mActiveSessions.emplace(std::make_pair(account.account_id, account));
-
+		auto b = mActiveSessions.emplace(std::make_pair(account.account_id, account));
+		if (!b) {
+			mActiveSessions.erase(account.account_id);
+			mActiveSessions.emplace(std::make_pair(account.account_id, account));
+		}
 		co_return app->OkResult(account, req.keep_alive());
 	}
 	catch (std::exception& err) {
