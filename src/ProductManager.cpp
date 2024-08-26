@@ -676,6 +676,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 				p.strength,
 				p.strength_type,
 				p.usage_info,
+				p.indications,
 				pp.unitprice,
 				pp.costprice,
 				p.package_size,
@@ -728,6 +729,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			std::string, 
 			std::string, 
 			std::string, 
+			std::string,
 			pof::base::currency,
 			pof::base::currency, 
 			std::uint64_t, 
@@ -741,16 +743,14 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		auto& group = boost::fusion::at_c<0>(ret);
 	
 
-		size_t size = 0, i = 0;
-		group.resize(data->size());
-
+		size_t i = 0;
+		group.reserve(data->size());
 		for (auto& d : *data) {
-			auto& vec = group[i];
-			grape::serial::compose(vec, d.first);
-			size += grape::serial::get_size(vec);
+			group.emplace_back(grape::serial::build<vector_type>(d.first));
 			i++;
 		}
 
+		const size_t size = grape::serial::get_size(ret);
 		grape::response::body_type::value_type value(size, 0x00);
 		grape::serial::write(boost::asio::buffer(value), ret);
 

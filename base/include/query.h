@@ -124,6 +124,7 @@ namespace pof {
 							case boost::mysql::column_type::smallint:
 								datameta.emplace_back(pof::base::data::kind::uint32);
 								break;
+							case boost::mysql::column_type::varchar:
 							case boost::mysql::column_type::text:
 							case boost::mysql::column_type::char_:
 								datameta.emplace_back(pof::base::data::kind::text);
@@ -412,6 +413,7 @@ namespace pof {
 									case boost::mysql::column_type::smallint:
 										datameta.emplace_back(pof::base::data::kind::uint32);
 										break;
+									case boost::mysql::column_type::varchar:
 									case boost::mysql::column_type::text:
 									case boost::mysql::column_type::char_:
 										datameta.emplace_back(pof::base::data::kind::text);
