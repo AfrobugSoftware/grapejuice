@@ -721,7 +721,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		using vector_type = boost::fusion::vector<
 			boost::uuids::uuid, 
 			boost::uuids::uuid, 
-			std::uint64_t,
+			std::int64_t,
 			std::string, 
 			std::string, 
 			std::string, 
@@ -732,12 +732,12 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			std::string,
 			pof::base::currency,
 			pof::base::currency, 
-			std::uint64_t, 
-			std::uint64_t, 
+			std::int64_t, 
+			std::int64_t, 
 			std::string, 
 			std::string, 
-			std::uint64_t, 
-			std::uint64_t>;
+			std::int64_t, 
+			std::int64_t>;
 		
 		grape::collection_type<vector_type> ret;
 		auto& group = boost::fusion::at_c<0>(ret);
