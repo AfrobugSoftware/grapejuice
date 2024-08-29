@@ -597,8 +597,8 @@ namespace pof {
 								base_t::m_data->emplace(std::move(v));
 							}
 						}
-						base_t::m_promise.set_value(base_t::m_data); //data moved into the datamodels cache
 					}
+					base_t::m_promise.set_value(base_t::m_data); //data moved into the datamodels cache
 				} catch (...) {
 					base_t::m_promise.set_exception(std::current_exception());
 				}

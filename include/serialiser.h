@@ -9,6 +9,12 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 
+#include <boost/iostreams/stream.hpp>
+#include <boost/iostreams/stream_buffer.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/device/array.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+
 
 #include "Data.h"
 #include "currency.h"
@@ -46,6 +52,9 @@ namespace grape
 		std::ranges::reverse(value_representation);
 		return std::bit_cast<T>(value_representation);
 	}
+	
+	using stream_t = boost::iostreams::filtering_stream<boost::iostreams::back_insert_device
+		<std::vector<std::byte>>>;
 
 	template<typename T>
 	concept Hashable = requires(T a)
@@ -242,6 +251,45 @@ namespace grape
 				}
 			}
 		};
+
+
+		//if this becomes wanted I would finish it
+		class writer_stream {
+		public:
+			using stream_t = boost::iostreams::filtering_stream<boost::iostreams::back_insert_device
+				<std::vector<std::byte>>>;
+			mutable std::reference_wrapper<stream_t> stream;
+			mutable opt_fields::bits_type opt_;
+			mutable opt_fields::value_type* optv_;
+
+			writer_stream(grape::stream_t& st) : stream(st), optv_{ nullptr } {}
+			template<Integers T>
+			void operator()(const T& i) const {
+				stream.get() << bswap(i);
+			}
+
+			template<Enums E>
+			void operator()(const E& e) const {
+				auto i = static_cast<std::underlying_type_t<E>>(e);
+				(*this)(i);
+			}
+
+			template<size_t N>
+				requires (std::integral_constant<int, N>::value <= 32)
+			void operator()(const std::bitset<N>& bs) const {
+				std::uint32_t val = bs.to_ulong();
+				(*this)(val);
+			}
+
+			void operator()(const std::chrono::year_month_day& ymd) const {
+				const std::uint16_t y = static_cast<int>(ymd.year());
+				const std::uint16_t dm = (static_cast<std::uint16_t>((static_cast<unsigned>(ymd.month()))) << 8) |
+					static_cast<std::uint16_t>(static_cast<unsigned>(ymd.day()));
+				const std::uint32_t tt = static_cast<std::uint32_t>(y) << 16 | static_cast<std::uint32_t>(dm);
+				stream.get() << bswap(tt);
+			}
+		};
+
 
 		class writer {
 		public:

@@ -407,14 +407,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::Application::onGetO
 	}
 }
 
-boost::asio::awaitable<std::shared_ptr<pof::base::data>> grape::Application::run_query(std::shared_ptr<pof::base::dataquerybase> query)
+boost::asio::awaitable<std::shared_ptr<pof::base::data>> grape::Application::run_query(std::shared_ptr<pof::base::dataquerybase> query,
+		std::chrono::system_clock::duration dur)
 {
 	query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-	query->m_waittime->expires_after(60s);
+	query->m_waittime->expires_after(dur);
 	auto fut = query->get_future();
-	bool tried = app->mDatabase->push(query);
+	bool tried = mDatabase->push(query);
 	if (!tried) {
-		tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
+		tried = co_await mDatabase->retry(query); //try to push into the queue multiple times
 		if (!tried) {
 			throw std::logic_error("error in query");
 		}

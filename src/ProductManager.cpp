@@ -409,13 +409,14 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
 
 	app->route("/product/formulary/create"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
-	app->route("/product/formulary/remove", std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
-	app->route("/product/formulary/get", std::bind_front(&grape::ProductManager::OnGetFormulary, this));
-	app->route("/product/formulary/getproducts", std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
-	app->route("/product/formulary/getformularyproducts", std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
-	app->route("/product/formulary/load", std::bind_front(&grape::ProductManager::OnLoadFormulary, this));
-	app->route("/product/formulary/checkname/{name}", std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
-	app->route("/product/formulary/hasformulary", std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
+	app->route("/product/formulary/remove"s, std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
+	app->route("/product/formulary/get"s, std::bind_front(&grape::ProductManager::OnGetFormulary, this));
+	app->route("/product/formulary/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
+	app->route("/product/formulary/getformularyproducts"s, std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
+	app->route("/product/formulary/load"s, std::bind_front(&grape::ProductManager::OnLoadFormulary, this));
+	app->route("/product/formulary/checkname/{name}"s, std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
+	app->route("/product/formulary/hasformulary"s, std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
+	app->route("/product/formulary/import"s, std::bind_front(&grape::ProductManager::OnImportFormulary, this));
 
 	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
@@ -424,28 +425,28 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/inventory/getcount"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
 
 	
-	app->route("/product/category/add", std::bind_front(&grape::ProductManager::OnAddCategory, this));
-	app->route("/product/category/remove", std::bind_front(&grape::ProductManager::OnRemoveCategory, this));
-	app->route("/product/category/update", std::bind_front(&grape::ProductManager::OnUpdateCategory, this));
-	app->route("/product/category/get", std::bind_front(&grape::ProductManager::OnGetCategory, this));
+	app->route("/product/category/add"s, std::bind_front(&grape::ProductManager::OnAddCategory, this));
+	app->route("/product/category/remove"s, std::bind_front(&grape::ProductManager::OnRemoveCategory, this));
+	app->route("/product/category/update"s, std::bind_front(&grape::ProductManager::OnUpdateCategory, this));
+	app->route("/product/category/get"s, std::bind_front(&grape::ProductManager::OnGetCategory, this));
 
-	app->route("/product/expired/mark", std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
-	app->route("/product/expired/get", std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
+	app->route("/product/expired/mark"s, std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
+	app->route("/product/expired/get"s, std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
 
-	app->route("/product/branch/transfer", std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
-	app->route("/product/branch/transfers/getpending", std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
-	app->route("/product/branch/transfers/approve", std::bind_front(&grape::ProductManager::OnApproveBranchTransfers, this));
-	app->route("/product/branch/transfers/reject", std::bind_front(&grape::ProductManager::OnRejectBranchTransfers, this));
+	app->route("/product/branch/transfer"s, std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
+	app->route("/product/branch/transfers/getpending"s, std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
+	app->route("/product/branch/transfers/approve"s, std::bind_front(&grape::ProductManager::OnApproveBranchTransfers, this));
+	app->route("/product/branch/transfers/reject"s, std::bind_front(&grape::ProductManager::OnRejectBranchTransfers, this));
 
-	app->route("/product/invoice/create", std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
-	app->route("/product/invoice/remove", std::bind_front(&grape::ProductManager::OnRemoveInvoice, this));
-	app->route("/product/invoice/get", std::bind_front(&grape::ProductManager::OnGetInvoices, this));
-	app->route("/product/invoice/getbydate", std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
-	app->route("/product/invoice/getproducts", std::bind_front(&grape::ProductManager::OnGetProductsInInvoice, this));
+	app->route("/product/invoice/create"s, std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
+	app->route("/product/invoice/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInvoice, this));
+	app->route("/product/invoice/get"s, std::bind_front(&grape::ProductManager::OnGetInvoices, this));
+	app->route("/product/invoice/getbydate"s, std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
+	app->route("/product/invoice/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProductsInInvoice, this));
 
-	app->route("/product/supplier/create", std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
-	app->route("/product/supplier/remove", std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
-	app->route("/product/supplier/get", std::bind_front(&grape::ProductManager::OnGetSupplier, this));
+	app->route("/product/supplier/create"s, std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
+	app->route("/product/supplier/remove"s, std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
+	app->route("/product/supplier/get"s, std::bind_front(&grape::ProductManager::OnGetSupplier, this));
 
 }
 
@@ -3874,15 +3875,17 @@ grape::ProductManager::OnImportFormulary(grape::request&& req, boost::urls::matc
 				boost::mysql::field(boost::mysql::blob(p.id.begin(), p.id.end()))
 			});
 		}
-		auto&& [rt, prt] = co_await(app->run_query(query) && app->run_query(pquery));
+		
+		co_await (app->run_query(query) && app->run_query(pquery));
 		co_await app->run_query(fquery);
 
-		co_return app->OkResult("Formulary added");
+		co_return app->OkResult("Products added to formulary");
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
 
 

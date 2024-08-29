@@ -147,6 +147,12 @@ namespace grape {
 			return res;
 		}
 
+		template<grape::FusionStruct T>
+		grape::response OkResultCompressed(const T& data, bool keep_alive = true, http::status stat = http::status::ok)
+		{
+			//until I need it
+		}
+
 		//application specific routes
 		void SetRoutes();
 		boost::asio::awaitable<pof::base::net_manager::res_t> onAppPing(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
@@ -154,7 +160,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> onAppUpdate(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> onGetOffice(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
 
-		boost::asio::awaitable<std::shared_ptr<pof::base::data>> run_query(std::shared_ptr<pof::base::dataquerybase> query);;
+		boost::asio::awaitable<std::shared_ptr<pof::base::data>> run_query(std::shared_ptr<pof::base::dataquerybase> query, std::chrono::system_clock::duration dur = 60s);
 
 
 		std::string mServerName; 
