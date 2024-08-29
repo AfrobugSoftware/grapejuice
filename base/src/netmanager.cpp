@@ -359,8 +359,8 @@ void pof::base::net_manager::listener::run()
 
 void pof::base::net_manager::httpsession::fail(beast::error_code ec, char const* what)
 {
-	// Don't report on canceled operations
-	if (ec == net::error::operation_aborted)
+	// Don't report on canceled operations or stream truncated errors
+	if (ec == net::error::operation_aborted || ec == net::ssl::error::stream_truncated)
 		return;
 	spdlog::error("httpsession error :{} {}", what, ec.message());
 }

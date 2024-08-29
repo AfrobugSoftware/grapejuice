@@ -3808,3 +3808,81 @@ grape::ProductManager::OnCheckHasFormulary(grape::request&& req, boost::urls::ma
 	}
 }
 
+boost::asio::awaitable<grape::response>
+grape::ProductManager::OnImportFormulary(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post)
+			co_return app->mNetManager.bad_request("expected a post request");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [form_id, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [prods, buf3]   = grape::serial::read<grape::collection_type<grape::product>>(buf2);
+		auto&& [pprods, buf4]  = grape::serial::read<grape::collection_type<grape::pharma_product>>(buf3);
+
+		auto& pv  = boost::fusion::at_c<0>(prods);
+		auto& ppv = boost::fusion::at_c<0>(pprods);
+
+		if (pv.size() != ppv.size())
+			throw std::invalid_argument("product data mistmatch");
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT IGNORE INTO products (
+				id,
+				serial_num,
+				name,
+				generic_name,
+				class,
+				formulation,
+				strength,
+				strength_type,
+				usage_info,
+				description,
+				indications,
+				package_size,
+				sideeffects,
+				barcode,
+				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)");
+		auto fquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT IGNORE INTO formulary_content 
+				SELECT ?,? 
+				WHERE EXISTS (
+					SELECT 1 FROM products WHERE id = ?
+			);)");
+		auto pquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT IGNORE INTO pharma_products VALUES (?,?,?,?,?,?,?,?,?,?);)");
+		auto& fid = boost::fusion::at_c<0>(form_id);
+		query->m_arguments.reserve(pv.size());
+		fquery->m_arguments.reserve(pv.size());
+		pquery->m_arguments.reserve(pv.size());
+
+		for (auto [p, pp] : grape::zip(pv, ppv)) {
+			pp.date_added = std::chrono::system_clock::now();
+
+			query->m_arguments.emplace_back(grape::serial::make_mysql_arg(p));
+			pquery->m_arguments.emplace_back(grape::serial::make_mysql_arg(pp));
+			fquery->m_arguments.emplace_back(std::vector<boost::mysql::field>{
+				boost::mysql::field(boost::mysql::blob(fid.begin(), fid.end())),
+				boost::mysql::field(boost::mysql::blob(p.id.begin(), p.id.end())),
+				boost::mysql::field(boost::mysql::blob(p.id.begin(), p.id.end()))
+			});
+		}
+		auto&& [rt, prt] = co_await(app->run_query(query) && app->run_query(pquery));
+		co_await app->run_query(fquery);
+
+		co_return app->OkResult("Formulary added");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+

@@ -10,6 +10,7 @@
 #include <boost/fusion/include/define_struct.hpp>
 #include "serialiser.h"
 
+#include "zip.h"
 #include <algorithm>
 //products
 namespace grape {
@@ -306,6 +307,8 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnCheckFormularyName(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetAttachedFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnCheckHasFormulary(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnImportFormulary(grape::request&& req, boost::urls::matches&& match);
+	
 
 
 		//category
