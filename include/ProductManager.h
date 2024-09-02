@@ -291,6 +291,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetPharmacyProductCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		
 
 

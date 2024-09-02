@@ -407,6 +407,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/remove"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
 	app->route("/product/addpharma"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
+	app->route("/product/search"s, std::bind_front(&grape::ProductManager::OnSearchProduct, this));
 
 	app->route("/product/formulary/create"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/formulary/remove"s, std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
@@ -742,19 +743,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		
 		grape::collection_type<vector_type> ret;
 		auto& group = boost::fusion::at_c<0>(ret);
-	
-
-		size_t i = 0;
 		group.reserve(data->size());
 		for (auto& d : *data) {
 			group.emplace_back(grape::serial::build<vector_type>(d.first));
-			i++;
 		}
-
-		const size_t size = grape::serial::get_size(ret);
-		grape::response::body_type::value_type value(size, 0x00);
-		grape::serial::write(boost::asio::buffer(value), ret);
-
 		co_return app->OkResult(ret, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
@@ -2139,6 +2131,117 @@ grape::ProductManager::OnSearchFormulary(pof::base::net_manager::req_t&& req, bo
 	}
 }
 
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnSearchProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get request");
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		using searchtype = boost::fusion::vector<std::uint32_t, std::string>;
+		auto&& [str, buf2] = grape::serial::read<searchtype>(buf);
+
+		auto& stype = boost::fusion::at_c<0>(str);
+		auto& ss = boost::fusion::at_c<1>(str);
+		if (ss.empty())  throw std::invalid_argument("No search string");
+		std::string_view type;
+		switch (stype)
+		{
+		case 0:
+			type = "name";
+			break;
+		case 1:
+			type = "generic_name";
+			break;
+		case 2:
+			type = "barcode";
+			break;
+		default:
+			throw std::invalid_argument("Invalid stype passed");
+			break;
+		}
+		boost::trim(ss);
+		boost::to_lower(ss);
+		std::string sql = std::format(R"(
+			SELECT p.id,
+				f.formulary_id,
+				p.serial_num,
+				p.name,
+				p.generic_name,
+				p.class,
+				p.formulation,
+				p.strength,
+				p.strength_type,
+				p.usage_info,
+				p.indications,
+				pp.unitprice,
+				pp.costprice,
+				p.package_size,
+				pp.stock_count,
+				p.sideeffects,
+				p.barcode,
+				pp.category_id,
+				pp.min_stock_count
+	   FROM products p
+	   INNER JOIN pharma_products pp
+	   ON p.id = pp.product_id
+	   INNER JOIN formulary_content f
+	   ON pp.product_id = f.product_id
+       WHERE pp.pharmacy_id = ? AND pp.branch_id = ? AND p.{} LIKE CONCAT(?,'%');
+		)", std::string(type));
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			std::move(sql));
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(ss)
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("not found");
+
+		using vector_type = boost::fusion::vector<
+			boost::uuids::uuid,
+			boost::uuids::uuid,
+			std::int64_t,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			pof::base::currency,
+			pof::base::currency,
+			std::int64_t,
+			std::int64_t,
+			std::string,
+			std::string,
+			std::int64_t,
+			std::int64_t>;
+
+		grape::collection_type<vector_type> ret;
+		auto& group = boost::fusion::at_c<0>(ret);
+		group.reserve(data->size());
+		for (auto& d : *data) {
+			group.emplace_back(grape::serial::build<vector_type>(d.first));
+		}
+		co_return app->OkResult(ret, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		app->mNetManager.server_error(exp.what());
+	}
+}
 
 
 void grape::ProductManager::RemoveFormulary() {

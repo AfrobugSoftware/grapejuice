@@ -16,7 +16,6 @@ namespace grape {
 		returned,
 		complete,
 		pending,
-		reversed,
 		deleted,
 	};
 
@@ -27,6 +26,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(grape), sale,
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, branch_id)
+	(boost::uuids::uuid, user_id)
 	(boost::uuids::uuid, id)
 	(boost::uuids::uuid, product_id)
 	(std::chrono::system_clock::time_point, sale_date)
@@ -35,6 +35,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(pof::base::currency, total)
 	(std::uint32_t, quantity)
 	(std::string, payment_method)
+	(std::string, payment_addinfo)
 	(std::string, product_label)
 	(grape::sale_state, state)
 	(std::string, add_info)
@@ -51,6 +52,9 @@ namespace grape {
 
 		//table functions
 		void CreateSaleTable();
+
+		boost::asio::awaitable<grape::response> OnSale(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetSale(grape::request&& req, boost::urls::matches&& match);
 
 	};
 
