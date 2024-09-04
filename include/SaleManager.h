@@ -55,6 +55,8 @@ namespace grape {
 
 		boost::asio::awaitable<grape::response> OnSale(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSale(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnReturn(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetSaleHistory(grape::request&& req, boost::urls::matches&& match);
 
 	};
 

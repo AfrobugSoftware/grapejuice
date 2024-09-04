@@ -127,7 +127,7 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 		std::string sql = std::format(R"(
 			SELECT * FROM ( SELECT s.*,
 			ROW_NUMER() OVER (ORDER BY p.sale_date) AS row_id
-			FROM sales
+			FROM sales s
 			WHERE s.pharmacy_id = ? AND s.branch_id = ? AND s.sale_state = ? 
 			AND {} = ?;
 		) as sub
@@ -168,6 +168,28 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 		}
 		
 		co_return app->OkResult(sales);
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> grape::SaleManager::OnReturn(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post)
+			co_return app->mNetManager.bad_request("expected a post");
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected a body");
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		
+	
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
