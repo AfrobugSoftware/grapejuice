@@ -76,6 +76,7 @@ void grape::Application::CreateRoutes()
 	mAccountManager.SetRoutes();
 	mPharmacyManager.SetRoutes();
 	mProductManager.SetRoutes();
+	mSaleManager.SetRoutes();
 	SetRoutes();
 }
 
@@ -85,6 +86,8 @@ void grape::Application::CreateTable()
 	mPharmacyManager.CreateTables();
 	mProductManager.CreateTables();
 	mProductManager.Procedures();
+	mSaleManager.CreateTables();
+
 	CreateAppDetailsTable();
 }
 

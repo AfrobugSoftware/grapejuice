@@ -18,6 +18,7 @@
 #include "AccountManager.h"
 #include "PharmacyManager.h"
 #include "ProductManager.h"
+#include "SaleManager.h"
 
 //protocol serialiser
 #include "serialiser.h"
@@ -167,9 +168,10 @@ namespace grape {
 		std::shared_ptr<pof::base::databasemysql> mDatabase;
 		std::uint16_t mPort = 8080;
 		pof::base::net_manager mNetManager;
-		grape::AccountManager mAccountManager;
+		grape::AccountManager  mAccountManager;
 		grape::PharmacyManager mPharmacyManager;
-		grape::ProductManager mProductManager;
+		grape::ProductManager  mProductManager;
+		grape::SaleManager     mSaleManager;
 
 		boost::asio::awaitable<void> RunUpdateTimer();
 		boost::optional<pof::base::dataquerybase::timer_t> mUpdateTimer = boost::none;

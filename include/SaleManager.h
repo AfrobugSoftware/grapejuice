@@ -41,6 +41,15 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, add_info)
 )
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), sale_history,
+	(boost::uuids::uuid, sale_id)
+	(boost::uuids::uuid, prod_id)
+	(std::int64_t, sale_quantity)
+	(pof::base::currency, total_amt)
+	(std::string, username)
+)
+
 namespace grape {
 	class SaleManager : public boost::noncopyable {
 	public:

@@ -12,6 +12,8 @@ void grape::SaleManager::SetRoutes()
 	auto app = grape::GetApp();
 	app->route("/sale/checkout", std::bind_front(&grape::SaleManager::OnSale, this));
 	app->route("/sale/get", std::bind_front(&grape::SaleManager::OnGetSale, this));
+	app->route("/sale/gethistory", std::bind_front(&grape::SaleManager::OnGetSaleHistory, this));
+	app->route("/sale/return", std::bind_front(&grape::SaleManager::OnReturn, this));
 }
 
 void grape::SaleManager::CreateSaleTable()
@@ -19,7 +21,7 @@ void grape::SaleManager::CreateSaleTable()
 	auto app = grape::GetApp();
 	try {
 		//sale_payment_method is an index into a sale_method table
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS sales  (
 				pharmacy_id binary(16),
 				branch_id binary(16),
@@ -122,9 +124,12 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 		constexpr const std::array<std::string_view, 3> ymds = {
 			"YEAR(s.sale_date)",
 			"MONTH(s.sale_date)",
-			"MONTHDAY(s.sale_date)"
+			"DAYOFMONTH(s.sale_date)"
 		};
-		std::string sql = std::format(R"(
+		if (boost::fusion::at_c<0>(st) >= ymds.size())
+			throw std::invalid_argument("invalid date value");
+
+		query->m_sql = std::format(R"(
 			SELECT * FROM ( SELECT s.*,
 			ROW_NUMER() OVER (ORDER BY p.sale_date) AS row_id
 			FROM sales s
@@ -132,7 +137,7 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 			AND {} = ?;
 		) as sub
 		HAVING row_id BETWEEN ? AND ?;)", ymds[boost::fusion::at_c<0>(st)].data());
-		query->m_sql = std::move(sql);
+
 		auto& item = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});
 		item.resize(6);
 
@@ -182,14 +187,114 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnReturn(grape::requ
 		if (req.method() != http::verb::post)
 			co_return app->mNetManager.bad_request("expected a post");
 		auto& body = req.body();
-		if (body.empty()) throw std::invalid_argument("Expected a body");
+		if (body.empty()) 
+			throw std::invalid_argument("Expected a body");
+
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
 		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 
-		
+		auto&& [sid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [pid, buf3] = grape::serial::read<grape::uid_t>(buf2);
+		auto& sale_id = boost::fusion::at_c<0>(sid);
+		auto& prod_id = boost::fusion::at_c<0>(pid);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(
+				BEGIN;
+				UPDATE sales SET state = ?
+			    WHERE sale_id = ? AND pharmacy_id = ? AND branch_id = ? AND product_id = ?;
+				COMMIT;)");
+		query->m_arguments = { {
+			boost::mysql::field(static_cast<std::underlying_type_t<sale_state>>(sale_state::returned)),
+			boost::mysql::field(boost::mysql::blob(sale_id.begin(), sale_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(prod_id.begin(), prod_id.end()))
+		} };
+		auto d = co_await app->run_query(query);
+
+		co_return app->OkResult("Sale returned");
 	
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSaleHistory(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		auto& body = req.body();
+		if (body.empty()) 
+			throw std::invalid_argument("Expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		using stt = boost::fusion::vector<std::uint32_t, std::chrono::year_month_day, grape::sale_state>;
+		auto&& [prod_id, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto&& [st, buf3]      = grape::serial::read<stt>(buf2);
+		auto&& [pg, buf4]      = grape::serial::read<grape::page>(buf3);
+		auto& pid = boost::fusion::at_c<0>(prod_id);
+
+		constexpr const std::array<std::string_view, 2> ymds = {
+			"MONTH(s.sale_date)",
+			"DAYOFMONTH(s.sale_date)"
+		};
+
+		if (boost::fusion::at_c<0>(st) >= ymds.size())
+			throw std::invalid_argument("invalid date value");
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_sql = std::format(R"(SELECT * 
+			FROM ( SELECT s.id, s.prod_id, s.quanitity, s.total, a.account_username
+			ROW_NUMER() OVER (ORDER BY p.sale_date) AS row_id
+			FROM sales s
+			JOIN acccounts a
+			ON s.user_id = a.account_id
+			WHERE s.pharmacy_id = ? AND s.branch_id = ? AND s.prod_id = ? AND {} = ?;
+		) as sub
+		HAVING row_id BETWEEN ? AND ?;)", ymds[boost::fusion::at_c<0>(st)].data());
+
+		auto& item = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});
+		item.resize(6);
+
+		item[0] = boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()));
+		item[1] = boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()));
+		item[2] = boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end()));
+		switch (boost::fusion::at_c<0>(st))
+		{
+		case 1:
+			item[3] = boost::mysql::field((std::uint32_t)boost::fusion::at_c<1>(st).month());
+			break;
+		case 2:
+			item[3] = boost::mysql::field((std::uint32_t)boost::fusion::at_c<1>(st).day());
+			break;
+		default:
+			break;
+		}
+		item[4] = boost::mysql::field(pg.begin);
+		item[5] = boost::mysql::field(pg.begin + pg.limit);
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("no sale history for product");
+
+		grape::collection_type<grape::sale_history> collect;
+		auto& sh = boost::fusion::at_c<0>(collect);
+		sh.reserve(data->size());
+		for (auto& d : *data) {
+			sh.emplace_back(grape::serial::build<sale_history>(d.first));
+		}
+		
+		co_return app->OkResult(collect, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
