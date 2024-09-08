@@ -107,7 +107,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, product_id)
 	(std::chrono::system_clock::time_point, expire_date)
 	(std::chrono::system_clock::time_point, input_date)
-	(std::uint64_t, stock_count)
+	(std::int64_t, stock_count)
 	(pof::base::currency, cost)
 	(boost::uuids::uuid, supplier_id)
 	(std::string, lot_number)
@@ -272,6 +272,7 @@ namespace grape {
 		void CreateExpiredTable();
 		void CreatePharmacyProductTable();
 		void CreateFormularyTable();
+		void CreateFormularyOverrideTable();
 		void CreateOrderTable();
 		void CreateWarningTable();
 		void CreateBranchTransferPendingTable();
@@ -309,6 +310,7 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnGetAttachedFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnCheckHasFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnImportFormulary(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetFormularyForProduct(grape::request&& req, boost::urls::matches&& match);
 	
 
 

@@ -81,7 +81,7 @@ void grape::ProductManager::CreateInventoryTable()
 				pharmacy_id binary(16) not null,
 				branch_id binary(16) not null,
 				inventory_id binary(16),
-				proudct_id  binary(16),
+				product_id  binary(16),
 				expire_date datetime,
 				input_date datetime,
 				stock_count integer,
@@ -283,8 +283,9 @@ void grape::ProductManager::CreateFormularyTable() {
 			R"(CREATE TABLE IF NOT EXISTS formulary_content (
 				formulary_id binary(16),
 				product_id binary(16),
-				PRIMARY KEY (formulary_id, product_id)
-		);)");
+				PRIMARY KEY (formulary_id, product_id),
+				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
+				FOREIGN KEY (product_id)   REFERENCES products(id));)");
 		fut = std::move(query->get_future());
 		query->m_hold_connection = true;
 		pushed = app->mDatabase->push(query);
@@ -297,8 +298,9 @@ void grape::ProductManager::CreateFormularyTable() {
 			R"(CREATE TABLE IF NOT EXISTS pharmacy_formulary (
 				formulary_id binary(16),
 				pharmacy_id binary(16),
-				PRIMARY KEY (formulary_id, pharmacy_id)
-		);)");
+				PRIMARY KEY (formulary_id, pharmacy_id),
+				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
+				FOREIGN KEY (pharmacy_id)  REFERENCES pharmacy(pharmacy_id));)");
 		fut = std::move(query->get_future());
 		pushed = app->mDatabase->push(query);
 		if (pushed)(void)fut.get();
@@ -310,6 +312,45 @@ void grape::ProductManager::CreateFormularyTable() {
 		spdlog::error(exp.what());
 	}
 }
+
+void grape::ProductManager::CreateFormularyOverrideTable()
+{
+	try {
+		auto app = grape::GetApp();
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE TABLE IF NOT EXISTS formulary_overrides (
+				formulary_id binary(16),
+				product_id binary(16),
+				serial_num integer,
+				name VARCHAR(250),
+				generic_name text,
+				class text,
+				formulation text,
+				strength text,
+				strength_type text,
+				usage_info text,
+				description text,
+				indications text,
+				package_size integer,
+				sideeffects text,
+				barcode text,
+				manufactures_name text,
+				PRIMARY KEY (formulary_id, product_id),
+				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
+				FOREIGN KEY (product_id) REFERENCES products(id));)");
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		if (pushed)(void)fut.get();
+		else {
+			throw std::logic_error("Cannot get connection to database");
+		}
+	
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+	}
+}
+
 
 void grape::ProductManager::CreateOrderTable()
 {
@@ -418,6 +459,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/formulary/checkname/{name}"s, std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
 	app->route("/product/formulary/hasformulary"s, std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
 	app->route("/product/formulary/import"s, std::bind_front(&grape::ProductManager::OnImportFormulary, this));
+	app->route("/product/formulary/getproductformularies"s, std::bind_front(&grape::ProductManager::OnGetFormularyForProduct, this));
 
 	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
@@ -824,6 +866,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			co_return app->mNetManager.bad_request("Get method expected");
 		}
 		auto& body = req.body();
+		if (body.empty())
+			throw std::invalid_argument("expected a body");
+
+
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
 		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
 			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
@@ -878,6 +924,52 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		co_return  app->mNetManager.server_error(exp.what());
 	}
 }
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetFormularyForProduct(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		auto& body = req.body();
+		if (body.empty())
+			throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [pid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto& prod_id = boost::fusion::at_c<0>(pid);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+		R"( SELECT f.* FROM formulary f
+			INNER JOIN formulary_content fc
+			ON f.id = fc.formulary_id
+			WHERE fc.product_id = ?;)");
+
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(prod_id.begin(), prod_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No formulary for product"); //error ?
+		grape::collection_type<grape::formulary> collect;
+		auto& c = boost::fusion::at_c<0>(collect);
+		c.reserve(data->size());
+
+		for (auto& d : *data) {
+			c.emplace_back(grape::serial::build<grape::formulary>(d.first));
+		}
+
+		co_return app->OkResult(collect, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+
 //gets the products in this formulary that are also in the pharmacy
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnGetProductsByFormulary(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
@@ -1376,6 +1468,8 @@ grape::ProductManager::OnAddInventory(pof::base::net_manager::req_t&& req, boost
 
 		auto&& [inven, buf2] = grape::serial::read<grape::inventory>(buf);
 		inven.id = (*uuidGen)();
+		inven.input_date = std::chrono::system_clock::now();
+
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?,?,?);)");
 		query->m_arguments = {{
@@ -1599,9 +1693,9 @@ grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(SELECT * FROM ( SELECT i.*,
-			ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY input_date DESC) AS row_id 
+			ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.input_date DESC) AS row_id 
 			FROM inventory i
-			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? ) AS sub
+			WHERE i.pharmacy_id = ? AND i.branch_id = ? AND i.product_id = ? ) AS sub
 			HAVING row_id BETWEEN ? AND ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(prod_id.pharmacy_id.begin(), prod_id.pharmacy_id.end())),
@@ -1652,7 +1746,8 @@ grape::ProductManager::OnGetInventory(pof::base::net_manager::req_t&& req, boost
 		co_return res;
 	}
 	catch (const std::exception& exp) {
-		
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
 	}
 }
 boost::asio::awaitable<pof::base::net_manager::res_t> 
