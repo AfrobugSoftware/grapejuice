@@ -179,7 +179,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, created_by)
 	(std::chrono::system_clock::time_point, created_date)
 	(std::string, version)
-	(std::uint64_t, usage_count)
+	(std::int64_t, usage_count)
 	(grape::formulary_access_level, access_level)
 )
 
@@ -293,7 +293,8 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
-		
+		boost::asio::awaitable<grape::response> OnGetProductCount(grape::request&& req, boost::urls::matches&& match);
+
 
 
 		//formulary routes

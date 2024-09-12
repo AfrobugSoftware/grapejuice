@@ -10,6 +10,8 @@
 
 #include <regex>
 #include <fstream>
+#include <source_location>
+#include <format>
 
 #include "netmanager.h"
 #include "databasemysql.h"
@@ -22,6 +24,16 @@
 
 //protocol serialiser
 #include "serialiser.h"
+
+//formatter for the source location
+template<typename CharT>
+struct std::formatter<std::source_location, CharT> : public std::formatter<std::string> {
+	template<typename FormatContext>
+	auto format(std::source_location& e, FormatContext& ctx) const {
+		return std::format_to(ctx.out(), "{} ({:d}:{:d}) : {}", e.file_name(), e.line(), e.column(), e.function_name());
+	}
+};
+
 
 //operation result message
 BOOST_FUSION_DEFINE_STRUCT(

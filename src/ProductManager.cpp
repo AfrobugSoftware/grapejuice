@@ -449,6 +449,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/addpharma"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
 	app->route("/product/search"s, std::bind_front(&grape::ProductManager::OnSearchProduct, this));
+	app->route("/product/count"s, std::bind_front(&grape::ProductManager::OnGetProductCount, this));
 
 	app->route("/product/formulary/create"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
 	app->route("/product/formulary/remove"s, std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
@@ -465,7 +466,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
 	app->route("/product/inventory/update"s, std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
 	app->route("/product/inventory/get"s, std::bind_front(&grape::ProductManager::OnGetInventory, this));
-	app->route("/product/inventory/getcount"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
+	app->route("/product/inventory/count"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
 
 	
 	app->route("/product/category/add"s, std::bind_front(&grape::ProductManager::OnAddCategory, this));
@@ -692,6 +693,44 @@ grape::ProductManager::OnUpdateProduct(pof::base::net_manager::req_t&& req, boos
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetProductCount(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		auto& body = req.body();
+		if (body.empty()) 
+			throw std::invalid_argument("requires an argument");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"( SELECT COUNT(pp.product_id) FROM pharma_products pp 
+			WHERE pp.pharmacy_id = ? AND pp.branch_id = ?
+			GROUP BY pp.branch_id;)");
+		query->m_arguments = { {
+		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No products in pharmacy branch");
+		size_t count = boost::variant2::get<std::int64_t>((*data->begin()).first[0]);
+
+		co_return app->OkResult(boost::fusion::vector<std::int64_t>{count}, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnGetProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
@@ -1769,8 +1808,9 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 		}
 		auto&& [prod_id, buf2] = grape::serial::read<grape::product_identifier>(buf);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT COUNT(id) FROM inventory 
-			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ? GROUP BY product_id;)");
+			R"(SELECT COUNT(inventory_id) FROM inventory 
+			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?
+		    GROUP BY product_id;)");
 		query->m_arguments = { {
 		boost::mysql::field(boost::mysql::blob(prod_id.pharmacy_id.begin(), prod_id.pharmacy_id.end())),
 		boost::mysql::field(boost::mysql::blob(prod_id.branch_id.begin(),	prod_id.branch_id.end())),
@@ -1795,10 +1835,10 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 		if (!data || data->empty()) {
 			co_return app->mNetManager.not_found("No inventory for product");
 		}
-		const size_t size = boost::variant2::get<std::uint64_t>(data->begin()->first[0]);
+		const size_t size = boost::variant2::get<std::int64_t>(data->begin()->first[0]);
 
-		grape::response::body_type::value_type value(sizeof(std::uint64_t), 0x00);
-		*boost::asio::buffer_cast<std::uint64_t*>(boost::asio::buffer(value)) =  grape::bswap(size);
+		grape::response::body_type::value_type value(sizeof(std::int64_t), 0x00);
+		*boost::asio::buffer_cast<std::int64_t*>(boost::asio::buffer(value)) =  grape::bswap(size);
 
 		grape::response res{ http::status::ok, 11 };
 		res.set(http::field::server, USER_AGENT_STRING);
@@ -1810,6 +1850,7 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 		
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(std::format("{}: {}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -4050,11 +4091,9 @@ grape::ProductManager::OnImportFormulary(grape::request&& req, boost::urls::matc
 				barcode,
 				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)");
 		auto fquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(INSERT IGNORE INTO formulary_content 
+			R"(INSERT IGNORE INTO formulary_content (formulary_id, product_id)
 				SELECT ?,? 
-				WHERE EXISTS (
-					SELECT 1 FROM products WHERE id = ?
-			);)");
+				WHERE EXISTS (SELECT 1 FROM products WHERE id = ?);)");
 		auto pquery = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"(INSERT IGNORE INTO pharma_products VALUES (?,?,?,?,?,?,?,?,?,?);)");
 		auto& fid = boost::fusion::at_c<0>(form_id);

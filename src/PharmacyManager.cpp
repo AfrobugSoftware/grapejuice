@@ -27,7 +27,8 @@ void grape::PharmacyManager::CreatePharmacyTable()
 			pharmacy_id binary(16) not null,
 			pharmacy_name text,
 			address_id binary(16),
-			pharmacy_info text
+			pharmacy_info text,
+			PRIMARY KEY (pharmacy_id)
 		);)");
 	auto fut = query->get_future();
 	app->mDatabase->push(query);
