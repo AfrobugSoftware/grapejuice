@@ -277,6 +277,8 @@ namespace grape {
 		void CreateWarningTable();
 		void CreateBranchTransferPendingTable();
 
+
+		void CreateIndexing();
 		//utilities
 		std::pair<boost::uuids::uuid, boost::uuids::uuid> SplitPidBid(boost::core::string_view str);
 

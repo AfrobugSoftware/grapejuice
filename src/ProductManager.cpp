@@ -33,6 +33,8 @@ void grape::ProductManager::CreateTables()
 	CreateOrderTable();
 	CreateWarningTable();
 	CreateBranchTransferPendingTable();
+
+	CreateIndexing();
 }
 
 void grape::ProductManager::CreateProductTable()
@@ -319,6 +321,7 @@ void grape::ProductManager::CreateFormularyOverrideTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS formulary_overrides (
+				override_id INT AUTO_INCREMENT,
 				formulary_id binary(16),
 				product_id binary(16),
 				serial_num integer,
@@ -335,9 +338,10 @@ void grape::ProductManager::CreateFormularyOverrideTable()
 				sideeffects text,
 				barcode text,
 				manufactures_name text,
-				PRIMARY KEY (formulary_id, product_id),
+				PRIMARY KEY (override_id),
 				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
-				FOREIGN KEY (product_id) REFERENCES products(id));)");
+				FOREIGN KEY (product_id) REFERENCES products(id))
+				UNIQUE (formulary_id, product_id);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
 		if (pushed)(void)fut.get();
@@ -392,6 +396,7 @@ void grape::ProductManager::CreateWarningTable()
 				product_id binary(16),
 				warning_text text
 			);)");
+
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
 		if (pushed)(void)fut.get();
@@ -426,6 +431,30 @@ void grape::ProductManager::CreateBranchTransferPendingTable(){
 		spdlog::error(exp.what());
 	}
 }
+
+void grape::ProductManager::CreateIndexing()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(
+				CREATE INDEX product_idx ON products(id);
+				CREATE INDEX form_idx ON formulary(id);
+		)");
+
+		auto fut = query->get_future();
+		bool pushed = app->mDatabase->push(query);
+		if (pushed)(void)fut.get();
+		else {
+			throw std::logic_error("Cannot get connection to database");
+		}
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}",
+			std::source_location::current(), exp.what()));
+	}
+}
+
 
 std::pair<boost::uuids::uuid, boost::uuids::uuid> grape::ProductManager::SplitPidBid(boost::core::string_view str)
 {
