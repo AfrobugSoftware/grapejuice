@@ -33,6 +33,7 @@ void grape::ProductManager::CreateTables()
 	CreateOrderTable();
 	CreateWarningTable();
 	CreateBranchTransferPendingTable();
+	CreateFormularyOverrideTable();
 
 	CreateIndexing();
 }
@@ -43,21 +44,21 @@ void grape::ProductManager::CreateProductTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS products (
-				id binary(16) not null,
+				id binary(16) NOT NULL,
 				serial_num integer,
-				name VARCHAR(250),
-				generic_name text,
-				class text,
-				formulation text,
-				strength text,
-				strength_type text,
+				name VARCHAR(256),
+				generic_name VARCHAR(512),
+				class VARCHAR(64),
+				formulation VARCHAR(64),
+				strength VARCHAR(64),
+				strength_type VARCHAR(64),
 				usage_info text,
 				description text,
 				indications text,
 				package_size integer,
 				sideeffects text,
-				barcode text,
-				manufactures_name text,
+				barcode VARCHAR(64),
+				manufactures_name VARCHAR(256),
 				PRIMARY KEY (id),
 				UNIQUE (name)
 			);)");
@@ -89,7 +90,7 @@ void grape::ProductManager::CreateInventoryTable()
 				stock_count integer,
 				cost binary(17),
 				supplier_uuid binary(16),
-				lot_number text
+				lot_number VARCHAR(256)
 			);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -137,7 +138,7 @@ void grape::ProductManager::CreateSupplierTable()
 			pharmacy_id binary(16),
 			branch_id binary(16),
 			supplier_id binary(16),
-			supplier_name text,
+			supplier_name VARCHAR(256),
 			date_created datetime,
 			date_modified datetime,
 			info text
@@ -223,8 +224,9 @@ void grape::ProductManager::CreateExpiredTable()
 			throw std::logic_error("Cannot get connection to database");
 		}
 	}
-	catch (const boost::mysql::error_with_diagnostics& err) {
-		spdlog::error(err.what());
+	catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
+
 	}
 }
 
@@ -254,7 +256,7 @@ void grape::ProductManager::CreatePharmacyProductTable()
 		}
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 	}
 }
 
@@ -311,7 +313,7 @@ void grape::ProductManager::CreateFormularyTable() {
 		}
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 	}
 }
 
@@ -321,27 +323,29 @@ void grape::ProductManager::CreateFormularyOverrideTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS formulary_overrides (
-				override_id INT AUTO_INCREMENT,
+				override_id INT NOT NULL AUTO_INCREMENT,
 				formulary_id binary(16),
 				product_id binary(16),
 				serial_num integer,
 				name VARCHAR(250),
-				generic_name text,
-				class text,
-				formulation text,
-				strength text,
-				strength_type text,
+				generic_name VARCHAR(64),
+				class VARCHAR(64),
+				formulation VARCHAR(64),
+				strength VARCHAR(256),
+				strength_type VARCHAR(64),
 				usage_info text,
 				description text,
 				indications text,
 				package_size integer,
 				sideeffects text,
-				barcode text,
-				manufactures_name text,
+				barcode VARCHAR(64),
+				manufactures_name VARCHAR(256),
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 				PRIMARY KEY (override_id),
 				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
-				FOREIGN KEY (product_id) REFERENCES products(id))
-				UNIQUE (formulary_id, product_id);)");
+				FOREIGN KEY (product_id)   REFERENCES products(id),
+				UNIQUE (formulary_id, product_id)
+		);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
 		if (pushed)(void)fut.get();
@@ -351,7 +355,7 @@ void grape::ProductManager::CreateFormularyOverrideTable()
 	
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 	}
 }
 
@@ -379,7 +383,7 @@ void grape::ProductManager::CreateOrderTable()
 
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 	}
 }
 
@@ -405,7 +409,8 @@ void grape::ProductManager::CreateWarningTable()
 		}
 	}
 	catch (std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
+
 	}
 }
 
@@ -438,8 +443,10 @@ void grape::ProductManager::CreateIndexing()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(
+				BEGIN;
 				CREATE INDEX product_idx ON products(id);
-				CREATE INDEX form_idx ON formulary(id);
+				CREATE INDEX form_idx    ON formulary(id);
+				COMMIT;
 		)");
 
 		auto fut = query->get_future();
@@ -781,20 +788,20 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			R"(SELECT * FROM (SELECT p.id,
 				f.formulary_id,
 				p.serial_num,
-				p.name,
-				p.generic_name,
-				p.class,
-				p.formulation,
-				p.strength,
-				p.strength_type,
-				p.usage_info,
-				p.indications,
+				COALESCE(fo.name, p.name) AS name,
+				COALESCE(fo.generic_name, p.generic_name) AS generic_name,
+				COALESCE(fo.class, p.class) AS class,
+				COALESCE(fo.formulation, p.formulation) AS formulation,
+				COALESCE(fo.strength, p.strength) AS strength,
+				COALESCE(fo.strength_type, fo.strength_type) AS strength_type,
+				COALESCE(fo.usage_info, fo.usage_info) AS usage_info,
+				COALESCE(fo.indications, fo.indications) AS indications,
 				pp.unitprice,
 				pp.costprice,
-				p.package_size,
+				COALESCE(fo.package_size, p.package_size) AS package_size,
 				pp.stock_count,
-				p.sideeffects,
-				p.barcode,
+				COALESCE(fo.sideeffects, p.sideeffects) AS sideeffects,
+				COALESCE(fo.barcode, p.barcode) AS barcode,
 				pp.category_id,
 				pp.min_stock_count,
 				ROW_NUMBER() OVER (ORDER BY p.name) AS row_id
@@ -803,6 +810,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 	   ON p.id = pp.product_id
 	   INNER JOIN formulary_content f
 	   ON pp.product_id = f.product_id
+	   LEFT JOIN formulary_override fo
+	   ON fo.product_id = p.product_id AND fo.formulary_id = f.formulary_id
        WHERE pp.pharmacy_id = ? AND pp.branch_id = ?) AS sub
 	   HAVING row_id BETWEEN ? AND ?;)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
