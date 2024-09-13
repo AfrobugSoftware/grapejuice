@@ -35,7 +35,6 @@ void grape::ProductManager::CreateTables()
 	CreateBranchTransferPendingTable();
 	CreateFormularyOverrideTable();
 
-	CreateIndexing();
 }
 
 void grape::ProductManager::CreateProductTable()
@@ -437,32 +436,6 @@ void grape::ProductManager::CreateBranchTransferPendingTable(){
 	}
 }
 
-void grape::ProductManager::CreateIndexing()
-{
-	auto app = grape::GetApp();
-	try {
-		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
-			R"(
-				BEGIN;
-				CREATE INDEX product_idx ON products(id);
-				CREATE INDEX form_idx    ON formulary(id);
-				COMMIT;
-		)");
-
-		auto fut = query->get_future();
-		bool pushed = app->mDatabase->push(query);
-		if (pushed)(void)fut.get();
-		else {
-			throw std::logic_error("Cannot get connection to database");
-		}
-	}
-	catch (const std::exception& exp) {
-		spdlog::error(std::format("{} :{}",
-			std::source_location::current(), exp.what()));
-	}
-}
-
-
 std::pair<boost::uuids::uuid, boost::uuids::uuid> grape::ProductManager::SplitPidBid(boost::core::string_view str)
 {
 	std::array<boost::core::string_view, 2> out;
@@ -810,8 +783,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 	   ON p.id = pp.product_id
 	   INNER JOIN formulary_content f
 	   ON pp.product_id = f.product_id
-	   LEFT JOIN formulary_override fo
-	   ON fo.product_id = p.product_id AND fo.formulary_id = f.formulary_id
+	   LEFT JOIN formulary_overrides fo
+	   ON fo.product_id = p.id AND fo.formulary_id = f.formulary_id
        WHERE pp.pharmacy_id = ? AND pp.branch_id = ?) AS sub
 	   HAVING row_id BETWEEN ? AND ?;)");
 		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
@@ -869,6 +842,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		co_return app->OkResult(ret, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -928,9 +902,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		co_return app->OkResult("Remove product from pharmacy");
 	}
 	catch (const js::json::exception& jerr) {
+		spdlog::error(std::format("{} :{}"s, std::source_location::current(), jerr.what()));
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
