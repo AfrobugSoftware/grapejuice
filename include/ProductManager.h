@@ -313,6 +313,7 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnCheckHasFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnImportFormulary(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetFormularyForProduct(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnUpdateByOverrideFormulary(grape::request&& req, boost::urls::matches&& match);
 	
 
 

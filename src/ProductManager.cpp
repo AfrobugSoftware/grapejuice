@@ -470,6 +470,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/formulary/hasformulary"s, std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
 	app->route("/product/formulary/import"s, std::bind_front(&grape::ProductManager::OnImportFormulary, this));
 	app->route("/product/formulary/getproductformularies"s, std::bind_front(&grape::ProductManager::OnGetFormularyForProduct, this));
+	app->route("/product/formulary/updateproduct"s, std::bind_front(&grape::ProductManager::OnUpdateByOverrideFormulary, this));
 
 	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
 	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
@@ -540,7 +541,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 				sideeffects,
 				barcode,
 				manufactures_name) VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)");
-		query->m_hold_connection;
+		query->m_hold_connection = true;
 		query->m_arguments.resize(products.group.size());
 		for (size_t i = 0; i < products.group.size(); i++) {
 			auto& arg = query->m_arguments[i];
@@ -735,7 +736,7 @@ grape::ProductManager::OnGetProductCount(grape::request&& req, boost::urls::matc
 		co_return app->OkResult(boost::fusion::vector<std::int64_t>{count}, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -842,10 +843,171 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		co_return app->OkResult(ret, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	constexpr static const std::array<std::string_view, 12> names = {
+			"name",
+			"generic_name",
+			"class",
+			"formulation",
+			"strength",
+			"strength_type",
+			"usage_info",
+			"package_size",
+			"stock_count",
+			"barcode",
+			"manufactures_name"
+	};
+	try {
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("post method expected");
+		}
+		auto& body = req.body();
+		if (body.empty())
+			throw std::invalid_argument("requires an argument");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		using bits =
+			boost::fusion::vector<std::bitset<boost::mpl::size<grape::product>::value>>;
+		auto&& [cbits, rbuf] = grape::serial::read<bits>(buf);
+		auto&& [fid, rbuf2] = grape::serial::read<uid_t>(rbuf);
+		auto&& [prod, rbuf3] = grape::serial::read<grape::product>(rbuf2);
+
+		auto& form_id = boost::fusion::at_c<0>(fid);
+		auto& bitset = boost::fusion::at_c<0>(cbits);
+		//set bitset for the produt id to 0, never update the product id
+		bitset.set(0, false);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase);
+		query->m_arguments.resize(1);
+		query->m_hold_connection = true;
+		//check if the product is already entered into the override table
+		query->m_sql = R"(SELECT 1 FROM formulary_overrides WHERE product_id = ? AND formulary_id = ?;)";
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())),
+			boost::mysql::field(boost::mysql::blob(form_id.begin(), form_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		query->m_arguments.clear();
+		query->m_promise = {};
+
+		auto ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+
+		if (!data || data->empty()) {
+			//assume that the product has not been inserted in the override table
+			std::ostringstream os;
+			std::ostringstream osv;
+
+			os << "INSERT INTO formulary_overrides ( ";
+			osv << "(";
+
+			using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::product>::value>;
+			boost::fusion::for_each(range(), [&](auto i) {
+				using int_type = std::decay_t<decltype(i)>;
+				using type = std::decay_t<decltype(boost::fusion::at<int_type>(prod))>;
+				if (!bitset.test(int_type::value)) return;
+
+				auto& p = boost::fusion::at<int_type>(prod);
+				if constexpr (int_type::value != 1) {
+					os << ",";
+					osv << ",";
+				}
+				os << fmt::format("{}", names[int_type::value]);
+				osv << "?";
+
+				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>, std::is_array<type>>)
+				{
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::blob(p.begin(), p.end())));
+
+				}
+				else if constexpr (std::is_same<type, pof::base::currency>::value)
+				{
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::blob(
+							p.data().begin(), p.data().end())));
+				}
+				else if constexpr (std::is_same_v<type, std::chrono::system_clock::time_point>) {
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::datetime(
+							std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(p))));
+				}
+				else {
+					query->m_arguments[0].push_back(boost::mysql::field(p));
+				}
+			});
+			query->m_sql = std::format("{} ) VALUES {} );", os.str(), osv.str());
+			data = co_await app->run_query(query);
+			if (!data) throw std::logic_error("Cannot create an override");
+		}else {
+			//entry exsits
+			std::ostringstream os;
+			os << "UPDATE formulary_overrides SET ";
+
+			using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::product>::value>;
+			boost::fusion::for_each(range(), [&](auto i) {
+				using int_type = std::decay_t<decltype(i)>;
+				using type = std::decay_t<decltype(boost::fusion::at<int_type>(prod))>;
+				if (!bitset.test(int_type::value)) return;
+
+				auto& p = boost::fusion::at<int_type>(prod);
+				if constexpr (int_type::value != 1) {
+					os << ",";
+				}
+				os << fmt::format("{} = ?", names[int_type::value]);
+				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>, std::is_array<type>>)
+				{
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::blob(p.begin(), p.end())));
+				}
+				else if constexpr (std::is_same<type, pof::base::currency>::value)
+				{
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::blob(
+							p.data().begin(), p.data().end())));
+				}
+				else if constexpr (std::is_same_v<type, std::chrono::system_clock::time_point>) {
+					query->m_arguments[0].push_back(boost::mysql::field(
+						boost::mysql::datetime(
+							std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(p))));
+				}
+				else {
+					query->m_arguments[0].push_back(boost::mysql::field(p));
+				}
+			});
+			os << "WHERE product_id = ? AND formulary_id = ?;";
+			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())));
+			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(form_id.begin(), form_id.end())));
+			query->m_sql = os.str();
+			data = co_await app->run_query(query);
+			if (!data) throw std::logic_error("Cannot create an override");
+		}
+		
+		query->m_arguments.clear();
+		ec = co_await query->close();
+		if (ec) throw std::system_error(ec);
+
+		co_return app->OkResult("Updated");
+		
+	}catch (const std::exception& exp) {
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 //long function, deleting products from all the points.
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -902,11 +1064,11 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		co_return app->OkResult("Remove product from pharmacy");
 	}
 	catch (const js::json::exception& jerr) {
-		spdlog::error(std::format("{} :{}"s, std::source_location::current(), jerr.what()));
+		spdlog::error(std::format("{} :{}", std::source_location::current(), jerr.what()));
 		co_return app->mNetManager.bad_request(jerr.what());
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(std::format("{} :{}"s, std::source_location::current(), exp.what()));
+		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -1355,8 +1517,8 @@ grape::ProductManager::OnRemoveFormulary(pof::base::net_manager::req_t&& req, bo
 boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::put) {
-			co_return app->mNetManager.bad_request("Put method expected");
+		if (req.method() != http::verb::post) {
+			co_return app->mNetManager.bad_request("post method expected");
 		}
 		if (!req.has_content_length()) {
 			co_return app->mNetManager.bad_request("Expected a body");
@@ -1383,16 +1545,25 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 		std::ostringstream os;
 		os << "UPDATE pharma_products SET ";
 		using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::pharma_product_opt>::value>;
+		size_t count = 0;
 		boost::fusion::for_each(range(), [&](auto i) {
 			using int_type = std::decay_t<decltype(i)>;
 			using type = std::decay_t<decltype(boost::fusion::at<int_type>(pp_opt))>;
 			if constexpr (grape::is_optional_field<type>::value) {
 				type& p = boost::fusion::at<int_type>(pp_opt);
 				if (p.has_value()) {
-					if constexpr (int_type::value != 1) {
+					if (count != 0) {
 						os << ",";
 					}
-					os << fmt::format("{} = ?", names[int_type::value]);
+					count++;
+					//handle stock count updates differently
+					if constexpr (int_type::value == 6) {
+						os << fmt::format("stock_count = stock_count + ?");
+					}
+					else {
+						os << fmt::format("{} = ?", names[int_type::value - 4]);
+					}
+
 					if constexpr (std::disjunction_v<std::is_same<typename type::value_type, boost::uuids::uuid>,
 						std::is_array<typename type::value_type>>) {
 						query->m_arguments[0].push_back(boost::mysql::field(
@@ -1415,29 +1586,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnU
 					}
 				}
 			}
-			});
-		os << "WHERE product_id = ? AND pharmacy_id = ? AND branch_id = ?;";
+		});
+		os << " WHERE product_id = ? AND pharmacy_id = ? AND branch_id = ?;";
+		query->m_sql = os.str();
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.product_id.begin(), pp_opt.product_id.end())));
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.pharmacy_id.begin(), pp_opt.pharmacy_id.end())));
 		query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(pp_opt.branch_id.begin(), pp_opt.branch_id.end())));
+		auto data = co_await app->run_query(query);
 
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(60s);
-		auto fut = query->get_future();
-		bool tried = app->mDatabase->push(query);
-		if (!tried) {
-			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
-			if (!tried) {
-				co_return app->mNetManager.server_error("Error in query");
-			}
-		}
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			co_return app->mNetManager.timeout_error();
-		}
-
-		(void)fut.get();
-
+		co_return app->OkResult("Updated");
 	}
 	catch (const std::exception& exp) {
 		co_return app->mNetManager.server_error(exp.what());
