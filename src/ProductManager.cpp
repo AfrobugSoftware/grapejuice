@@ -853,7 +853,7 @@ boost::asio::awaitable<grape::response>
 grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
-	constexpr static const std::array<std::string_view, 12> names = {
+	constexpr static const std::array<std::string_view, 14> names = {
 			"name",
 			"generic_name",
 			"class",
@@ -861,6 +861,8 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 			"strength",
 			"strength_type",
 			"usage_info",
+			"description",
+			"indications",
 			"package_size",
 			"stock_count",
 			"barcode",
@@ -906,14 +908,16 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 		auto ec = co_await query->close();
 		if (ec) throw std::system_error(ec);
 
+		query->m_arguments.resize(1);
 		if (!data || data->empty()) {
 			//assume that the product has not been inserted in the override table
 			std::ostringstream os;
 			std::ostringstream osv;
-
-			os << "INSERT INTO formulary_overrides ( ";
-			osv << "(";
-
+			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())));
+			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(form_id.begin(), form_id.end())));
+			os << "INSERT INTO formulary_overrides ( product_id, formulary_id, ";
+			osv << "( ?, ?, ";
+			size_t count = 0;
 			using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::product>::value>;
 			boost::fusion::for_each(range(), [&](auto i) {
 				using int_type = std::decay_t<decltype(i)>;
@@ -921,11 +925,12 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 				if (!bitset.test(int_type::value)) return;
 
 				auto& p = boost::fusion::at<int_type>(prod);
-				if constexpr (int_type::value != 1) {
+				if (count++ != 0) {
 					os << ",";
 					osv << ",";
 				}
-				os << fmt::format("{}", names[int_type::value]);
+
+				os << fmt::format("{}", names[int_type::value - 2]);
 				osv << "?";
 
 				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>, std::is_array<type>>)
@@ -956,7 +961,7 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 			//entry exsits
 			std::ostringstream os;
 			os << "UPDATE formulary_overrides SET ";
-
+			size_t count = 0;
 			using range = boost::mpl::range_c<unsigned, 0, boost::mpl::size<grape::product>::value>;
 			boost::fusion::for_each(range(), [&](auto i) {
 				using int_type = std::decay_t<decltype(i)>;
@@ -964,10 +969,10 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 				if (!bitset.test(int_type::value)) return;
 
 				auto& p = boost::fusion::at<int_type>(prod);
-				if constexpr (int_type::value != 1) {
+				if (count++ != 0) {
 					os << ",";
 				}
-				os << fmt::format("{} = ?", names[int_type::value]);
+				os << fmt::format("{} = ?", names[int_type::value - 2]);
 				if constexpr (std::disjunction_v<std::is_same<type, boost::uuids::uuid>, std::is_array<type>>)
 				{
 					query->m_arguments[0].push_back(boost::mysql::field(
@@ -988,7 +993,7 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 					query->m_arguments[0].push_back(boost::mysql::field(p));
 				}
 			});
-			os << "WHERE product_id = ? AND formulary_id = ?;";
+			os << " WHERE product_id = ? AND formulary_id = ?;";
 			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(prod.id.begin(), prod.id.end())));
 			query->m_arguments[0].push_back(boost::mysql::field(boost::mysql::blob(form_id.begin(), form_id.end())));
 			query->m_sql = os.str();
@@ -996,6 +1001,7 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 			if (!data) throw std::logic_error("Cannot create an override");
 		}
 		
+		query->unborrow();
 		query->m_arguments.clear();
 		ec = co_await query->close();
 		if (ec) throw std::system_error(ec);
@@ -1018,13 +1024,10 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		if (req.method() != http::verb::delete_) {
 			co_return app->mNetManager.bad_request("Get method expected");
 		}
-
-		if (!req.has_content_length()) {
-			co_return app->mNetManager.bad_request("Body is required");
-		}
-		
+	
 		auto& body = req.body();
-		if (body.empty()) throw std::invalid_argument("Requires an argument");
+		if (body.empty()) 
+			throw std::invalid_argument("Requires an argument");
 
 		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
 		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
@@ -1032,42 +1035,25 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 		
-		//get product ID
-		auto&& [product, buf2] = grape::serial::read<grape::pharma_product>(buf);
+		//get product IDs to delete
+		auto&& [product, buf2] = grape::serial::read<grape::collection_type<grape::uid_t>>(buf);
+		auto& ps = boost::fusion::at_c<0>(product);
 
-
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(CALL remove_pharma_product(?, ?, ?);)");
-		query->m_arguments = { {
-		boost::mysql::field(boost::mysql::blob(product.product_id.begin(), product.product_id.end())),
-		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
-		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()))
-		} };
-
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(60s);
-		auto fut = query->get_future();
-		bool tried = app->mDatabase->push(query);
-		if (!tried) {
-			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
-			if (!tried) {
-				co_return app->mNetManager.server_error("Error in query");
-			}
-		}
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			co_return app->mNetManager.timeout_error();
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(CALL remove_pharma_product(?, ?, ?);)");
+		query->m_arguments.reserve(ps.size());
+		for (auto& pp : ps) {
+			auto& pid = boost::fusion::at_c<0>(pp);
+			auto& args = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});
+			args.push_back(boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())));
+			args.push_back(boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())));
+			args.push_back(boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(),  cred.pharm_id.end())));
+			
 		}
 
-		(void)fut.get();
+		co_await app->run_query(query);
 
 		co_return app->OkResult("Remove product from pharmacy");
-	}
-	catch (const js::json::exception& jerr) {
-		spdlog::error(std::format("{} :{}", std::source_location::current(), jerr.what()));
-		co_return app->mNetManager.bad_request(jerr.what());
-	}
-	catch (const std::exception& exp) {
+	}catch (const std::exception& exp) {
 		spdlog::error(std::format("{} :{}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
