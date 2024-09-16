@@ -663,7 +663,9 @@ grape::AccountManager::OnVerifyUser(pof::base::net_manager::req_t&& req, boost::
 		auto&& [v, buf] = grape::serial::read<grape::account_cred>(boost::asio::buffer(body));
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(SELECT a.type, a.username, a.passhash FROM accounts a WHERE a.pharmacy_id = ? AND a.username = ?;)");
+			R"(SELECT a.account_type, a.account_username, a.account_passhash 
+			   FROM accounts a 
+			   WHERE a.pharmacy_id = ? AND a.account_username = ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(boost::fusion::at_c<0>(v).begin(),  boost::fusion::at_c<0>(v).end())),
 			boost::mysql::field(boost::fusion::at_c<2>(v))

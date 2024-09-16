@@ -1014,8 +1014,6 @@ grape::ProductManager::OnUpdateByOverrideFormulary(grape::request&& req, boost::
 	}
 }
 
-
-//long function, deleting products from all the points.
 boost::asio::awaitable<pof::base::net_manager::res_t> 
 	grape::ProductManager::OnRemoveProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
 {
@@ -1044,10 +1042,9 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		for (auto& pp : ps) {
 			auto& pid = boost::fusion::at_c<0>(pp);
 			auto& args = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});
-			args.push_back(boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())));
-			args.push_back(boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())));
 			args.push_back(boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(),  cred.pharm_id.end())));
-			
+			args.push_back(boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())));
+			args.push_back(boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())));
 		}
 
 		co_await app->run_query(query);
@@ -1119,7 +1116,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 			v.emplace_back(grape::serial::build<grape::formulary>(d.first));
 		}
 
-		co_return app->OkResult(forms);
+		co_return app->OkResult(forms, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		co_return  app->mNetManager.server_error(exp.what());
