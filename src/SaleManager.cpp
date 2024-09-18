@@ -23,24 +23,24 @@ void grape::SaleManager::CreateSaleTable()
 		//sale_payment_method is an index into a sale_method table
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS sales  (
-				pharmacy_id binary(16),
-				branch_id binary(16),
-				user_id binary(16),
-				sale_id binary(16) NOT NULL,
-				product_id binary(16),
-				formulary_id binary(16),
-				sale_date datetime,
+				pharmacy_id     binary(16),
+				branch_id       binary(16),
+				user_id         binary(16),
+				sale_id         binary(16) NOT NULL,
+				product_id      binary(16),
+				formulary_id    binary(16),
+				sale_date       datetime,
 				unit_cost_price binary(17),
 				unit_sale_price binary(17),
-				discount binary(17),
-				total_amount binary(17),
-				quantity integer,
-				payment_method text,
+				discount        binary(17),
+				total_amount    binary(17),
+				quantity        integer,
+				payment_method  VARCHAR(64),
 				payment_addinfo text,
-				product_label text,
-				sale_state integer,
-				sale_add_info text,
-				PRIMARY KEY (sale_id)
+				product_label   text,
+				sale_state      integer,
+				sale_add_info   text,
+				PRIMARY KEY     (sale_id)
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -49,6 +49,84 @@ void grape::SaleManager::CreateSaleTable()
 	catch (const std::exception& exp) {
 		
 		spdlog::error(exp.what());
+	}
+}
+
+void grape::SaleManager::CreateProcedure()
+{
+	CreateSaleProcedure();
+	CreateReturnProcedure();
+}
+
+void grape::SaleManager::CreateSaleProcedure()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE PROCEDURE IF NOT EXISTS do_sale (
+				IN pharmacy_id binary(16),
+				IN branch_id    binary(16),
+				IN user_id      binary(16),
+				IN sale_id      binary(16),
+				IN product_id   binary(16),
+				IN formulary_id binary(16),
+				IN sale_date       datetime,
+				IN unit_cost_price binary(17),
+				IN unit_sale_price binary(17),
+				IN discount        binary(17),
+				IN total_amount    binary(17),
+				IN quantity        integer,
+				IN payment_method  VARCHAR(256),
+				IN payment_addinfo text,
+				IN product_label   text,
+				IN sale_state      integer,
+				IN sale_add_info   text)
+			   BEGIN
+				START TRANSACTION;
+				INSERT IGNORE INTO sales VALUES (pharmacy_id,branch_id,user_id,sale_id,product_id,formulary_id,
+				sale_date,unit_cost_price, unit_sale_price, discount,total_amount,quantity,payment_method,payment_addinfo,
+				product_label,sale_state,sale_add_info);
+				UPDATE pharma_products pp SET pp.stock_count = pp.stock_count - quantity WHERE pp.pharmacy_id = pharmacy_id AND pp.branch_id = branch_id AND pp.product_id = product_id;
+				COMMIT;
+			  END;
+		)");
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		(void)fut.get(); //block until complete
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(std::format("{}: {}", std::source_location::current(), exp.what()));
+	}
+}
+
+void grape::SaleManager::CreateReturnProcedure()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE PROCEDURE IF NOT EXISTS do_return(IN pharm_id binary(16), 
+			   IN bid binary(16), 
+			   IN sid binary(16),
+			   IN pid binary(16),
+			   IN ret integer,
+			   IN quantity integer)
+			   BEGIN
+				START TRANSACTION;
+				UPDATE sales s SET state = ret WHERE s.sale_id = sid  AND s.pharmacy_id = pharm_id AND s.branch_id = bid AND s.product_id = pid;
+				UPDATE pharma_products pp SET pp.stock_count = pp.stock_count + quantity WHERE pp.pharmacy_id = pharm_id AND pp.branch_id = bid AND pp.product_id = pid;
+				COMMIT;
+			  END;
+		)");
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		(void)fut.get(); //block until complete
+	
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(std::format("{}: {}", std::source_location::current(), exp.what()));
+
 	}
 }
 
@@ -66,14 +144,7 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnSale(grape::reques
 		}
 
 		auto&& [sale, buf2] = grape::serial::read<grape::collection_type<grape::sale>>(buf);
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-		R"(
-			BEGIN;
-			INSERT IGNORE INTO sales VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
-			UPDATE pharma_products SET stock_count = stock_count - ? 
-			WHERE pharmacy_id = ? AND branch_id = ? AND product_id = ?;
-			COMMIT;	
-		)"s);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(CALL do_sales(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		auto& s = boost::fusion::at_c<0>(sale);
 		query->m_arguments.reserve(s.size());
 		auto sale_date = std::chrono::system_clock::now();
@@ -99,7 +170,7 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnSale(grape::reques
 
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{}: {}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -175,7 +246,7 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 		co_return app->OkResult(sales);
 	}
 	catch (const std::exception& exp) {
-		spdlog::error(exp.what());
+		spdlog::error(std::format("{}: {}", std::source_location::current(), exp.what()));
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
@@ -195,23 +266,22 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnReturn(grape::requ
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 
-		auto&& [sid, buf2] = grape::serial::read<grape::uid_t>(buf);
-		auto&& [pid, buf3] = grape::serial::read<grape::uid_t>(buf2);
-		auto& sale_id = boost::fusion::at_c<0>(sid);
-		auto& prod_id = boost::fusion::at_c<0>(pid);
+		auto&& [sid, buf2]  = grape::serial::read<grape::uid_t>(buf);
+		auto&& [pid, buf3]  = grape::serial::read<grape::uid_t>(buf2);
+		auto&& [quan, buf4] = grape::serial::read<boost::fusion::vector<std::int64_t>>(buf3);
+		auto& sale_id  = boost::fusion::at_c<0>(sid);
+		auto& prod_id  = boost::fusion::at_c<0>(pid);
+		auto& quantity = boost::fusion::at_c<0>(quan);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(
-				BEGIN;
-				UPDATE sales SET state = ?
-			    WHERE sale_id = ? AND pharmacy_id = ? AND branch_id = ? AND product_id = ?;
-				COMMIT;)");
+			R"(CALL do_return(?,?,?,?,?,?);)");
 		query->m_arguments = { {
-			boost::mysql::field(static_cast<std::underlying_type_t<sale_state>>(sale_state::returned)),
-			boost::mysql::field(boost::mysql::blob(sale_id.begin(), sale_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
 			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
-			boost::mysql::field(boost::mysql::blob(prod_id.begin(), prod_id.end()))
+			boost::mysql::field(boost::mysql::blob(sale_id.begin(), sale_id.end())),
+			boost::mysql::field(boost::mysql::blob(prod_id.begin(), prod_id.end())),
+			boost::mysql::field(static_cast<std::underlying_type_t<sale_state>>(sale_state::returned)),
+			boost::mysql::field(quantity)
 		} };
 		auto d = co_await app->run_query(query);
 

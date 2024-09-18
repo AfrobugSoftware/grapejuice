@@ -329,6 +329,8 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdateInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetInventoryCount(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetStockEntryForMonth(grape::request&& req, boost::urls::matches&& match);
+
 
 		//expired products
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkAsExpired(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);

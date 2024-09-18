@@ -61,6 +61,9 @@ namespace grape {
 
 		//table functions
 		void CreateSaleTable();
+		void CreateProcedure();
+		void CreateSaleProcedure();
+		void CreateReturnProcedure();
 
 		boost::asio::awaitable<grape::response> OnSale(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSale(grape::request&& req, boost::urls::matches&& match);

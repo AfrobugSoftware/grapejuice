@@ -477,8 +477,8 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/inventory/update"s, std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
 	app->route("/product/inventory/get"s, std::bind_front(&grape::ProductManager::OnGetInventory, this));
 	app->route("/product/inventory/count"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
+	app->route("/product/inventory/stockcount"s, std::bind_front(&grape::ProductManager::OnGetStockEntryForMonth, this));
 
-	
 	app->route("/product/category/add"s, std::bind_front(&grape::ProductManager::OnAddCategory, this));
 	app->route("/product/category/remove"s, std::bind_front(&grape::ProductManager::OnRemoveCategory, this));
 	app->route("/product/category/update"s, std::bind_front(&grape::ProductManager::OnUpdateCategory, this));
@@ -2008,6 +2008,65 @@ grape::ProductManager::OnGetInventoryCount(pof::base::net_manager::req_t&& req, 
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetStockEntryForMonth(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		if (!req.has_content_length()) {
+			co_return app->mNetManager.bad_request("Expected a body");
+		}
+		auto& body = req.body();
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		using stt = boost::fusion::vector<std::chrono::year_month_day, grape::sale_state>;
+		auto&& [st, buf3] = grape::serial::read<stt>(buf);
+		auto&& [pg, buf4] = grape::serial::read<grape::page>(buf3);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT p.name, 
+				i.cost_price, 
+				i.stock_count,
+				i.input_date
+				FROM inventory
+				INNER JOIN products p
+				ON p.id = i.product_id
+				WHERE i.pharmacy_id = ? AND i.branch_id = ? AND MONTH(i.input_date) = ?;
+		)");
+		query->m_arguments = { {
+		boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+		boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+		boost::mysql::field((std::uint32_t)boost::fusion::at_c<0>(st).month())
+		} };
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No inventory for month");
+		using ret_t = grape::collection_type<boost::fusion::vector<
+			std::string, pof::base::currency, std::int64_t, std::chrono::system_clock::time_point
+			>>;
+		ret_t collect;
+		auto& c = boost::fusion::at_c<0>(collect);
+		c.reserve(data->size());
+		for (auto& d : *data) {
+			using value_type = std::decay_t<decltype(c)>::value_type;
+			c.emplace_back(grape::serial::build<value_type>(d.first));
+		}
+		
+		co_return app->OkResult(collect, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
 grape::ProductManager::OnAddCategory(pof::base::net_manager::req_t&& req, boost::urls::matches&& match) {

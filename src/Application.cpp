@@ -87,6 +87,7 @@ void grape::Application::CreateTable()
 	mProductManager.CreateTables();
 	mProductManager.Procedures();
 	mSaleManager.CreateTables();
+	mSaleManager.CreateProcedure();
 
 	CreateAppDetailsTable();
 }
