@@ -64,6 +64,30 @@ void grape::AccountManager::SetRoutes()
 
 }
 
+void grape::AccountManager::LoadActiveSessions()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(SELECT * FROM accounts WHERE session_id != ?;)");
+		auto nullid = boost::uuids::nil_uuid();
+		query->m_arguments = { {boost::mysql::field(boost::mysql::blob(nullid.begin(), nullid.end()))} };
+		
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		auto accountDetails = fut.get();
+		if (!accountDetails || accountDetails->empty()) return;
+
+		for (auto& ac : *accountDetails) {
+			auto v = grape::serial::build<grape::account>(ac.first);
+			if (v.session_start_time.value() + mSessionDuration < pof::base::data::clock_t::now()) continue;
+
+			mActiveSessions.emplace(std::make_pair(v.account_id, v));
+		}
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+	}
+}
 
 boost::asio::awaitable<pof::base::net_manager::res_t>
 	grape::AccountManager::OnSignUp(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
@@ -371,6 +395,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		}
 
 		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("No data in body");
+
 		auto&& [cred, buf] = grape::serial::read<grape::session_cred>(boost::asio::buffer(body));
 		if (cred.session_start_time + mSessionDuration <= std::chrono::system_clock::now()) {
 			co_return app->mNetManager.auth_error("Session time out");
@@ -379,11 +405,18 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 
 		//increase timeout ?
 		auto session_time = pof::base::data::clock_t::now();		
+
 		//get account for the session
+		//might be a slow operation
 		grape::account account;
-		auto found = mActiveSessions.visit(cred.session_id, [&](auto& v) {
-			account = v.second;
+		auto found = !mActiveSessions.visit_while([&](auto& v) {
+			if (v.second.session_id.value() == cred.session_id) {
+				account = v.second;
+				return false;
+			}
+			else return true;
 		});
+
 		if (!found) {
 			co_return app->mNetManager.auth_error("Session time out");
 		}
@@ -394,7 +427,7 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		
 		//update database
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(UPDATE accounts SET session_start_time = ?, session_id = ? WHERE account_id = ?;)");
+			R"(UPDATE accounts SET session_start = ?, session_id = ? WHERE account_id = ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::datetime(std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(session_time))),
 			boost::mysql::field(boost::mysql::blob(account.session_id.value().begin(), account.session_id.value().end())),
@@ -418,8 +451,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 		(void)fut.get();
 
 		//update cache
-		mActiveSessions.erase(cred.session_id);
-		mActiveSessions.emplace(std::make_pair(account.session_id.value(), account));
+		mActiveSessions.erase(account.account_id);
+		mActiveSessions.emplace(std::make_pair(account.account_id, account));
 
 		co_return app->OkResult(account, req.keep_alive());
 	}

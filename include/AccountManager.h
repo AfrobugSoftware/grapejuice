@@ -90,7 +90,7 @@ namespace grape
 
 		void CreateAccountTable();
 		void SetRoutes();
-
+		void LoadActiveSessions();
 
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignUp(pof::base::net_manager::req_t&& req,boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSignIn(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);

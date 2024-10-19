@@ -46,6 +46,8 @@ bool grape::Application::Init(int argc, char** argv)
 	mNetManager.bind_addr(tcp::endpoint(tcp::v4(), vm["serverport"].as<std::uint16_t>()));
 	CreateRoutes();
 
+	//load active sessions
+	mAccountManager.LoadActiveSessions();
 
 	//setup update
 	mUpdateAsyncFuncs.emplace_back(std::bind_front(&grape::AccountManager::UpdateSessions, &mAccountManager));

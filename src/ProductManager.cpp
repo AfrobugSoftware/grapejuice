@@ -486,6 +486,7 @@ void grape::ProductManager::SetRoutes()
 
 	app->route("/product/expired/mark"s, std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
 	app->route("/product/expired/get"s, std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
+	app->route("/product/expired/check"s, std::bind_front(&grape::ProductManager::OnCheckExpiredProduct, this));
 
 	app->route("/product/branch/transfer"s, std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
 	app->route("/product/branch/transfers/getpending"s, std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
@@ -2738,6 +2739,57 @@ boost::asio::awaitable<pof::base::net_manager::res_t> grape::ProductManager::OnG
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnCheckExpiredProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("Expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("Expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [p, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto& pid        = boost::fusion::at_c<0>(p);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"( 
+				SELECT MAX(i.input_date) 
+				FROM inventory i
+			    WHERE i.pharmacy_id = ? AND i.branch_id = ? AND i.product_id = ? AND i.expire_date <= ?;
+		)");
+		auto date = std::chrono::time_point_cast<std::chrono::sys_days::duration>(std::chrono::system_clock::now());
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())),
+			boost::mysql::field(boost::mysql::datetime(date))
+		} };
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Not expired");
+		const auto d = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+			boost::variant2::get<pof::base::data::datetime_t>((*data->begin()).first[0]));
+		
+		if (d == pof::base::data::datetime_t{})
+			co_return app->mNetManager.not_found("Not expired");
+		
+		co_return app->OkResult("Product expired");
+	}
+	catch (const std::exception& exp) {
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
 grape::ProductManager::OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)

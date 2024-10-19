@@ -335,6 +335,7 @@ namespace grape {
 		//expired products
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkAsExpired(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnGetExpiredProducts(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnCheckExpiredProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		//invoices and suppliers
 		boost::asio::awaitable<grape::response> OnCreateInvoice(grape::request&& req, boost::urls::matches&& match);
