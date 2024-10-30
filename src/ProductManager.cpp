@@ -110,14 +110,25 @@ void grape::ProductManager::CreatePackTable()
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS packs (
 				pharmacy_id binary(16),
-				branch_id binary(16),
-				pack_id binary(16),
-				product_id binary(16),
-				quantity integer,
-				exact_cost binary(17)
+				branch_id   binary(16),
+				pack_id     binary(16),
+				name        VARCHAR(256),
+				quantity    integer,
+				exact_cost  binary(17)
 			);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
+		if (pushed)(void)fut.get();
+		else {
+			throw std::logic_error("Cannot get connection to database");
+		}
+		query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"( CREATE TABLE IF NOT EXISTS pack_products (
+					pack_id    binary(16),
+					product_id binary(16)
+			);)");
+		fut = query->get_future();
+		pushed = app->mDatabase->push(query);
 		if (pushed)(void)fut.get();
 		else {
 			throw std::logic_error("Cannot get connection to database");
@@ -451,58 +462,67 @@ std::pair<boost::uuids::uuid, boost::uuids::uuid> grape::ProductManager::SplitPi
 void grape::ProductManager::SetRoutes()
 {
 	auto app = grape::GetApp();
-	app->route("/product/add"s, std::bind_front(&grape::ProductManager::OnAddProduct, this));
-	app->route("/product/update"s, std::bind_front(&grape::ProductManager::OnUpdateProduct, this));
-	app->route("/product/get"s, std::bind_front(&grape::ProductManager::OnGetProducts, this));
-	app->route("/product/remove"s, std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
-	app->route("/product/addpharma"s, std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
+	app->route("/product/add"s,          std::bind_front(&grape::ProductManager::OnAddProduct, this));
+	app->route("/product/update"s,       std::bind_front(&grape::ProductManager::OnUpdateProduct, this));
+	app->route("/product/get"s,          std::bind_front(&grape::ProductManager::OnGetProducts, this));
+	app->route("/product/remove"s,       std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
+	app->route("/product/addpharma"s,    std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
-	app->route("/product/search"s, std::bind_front(&grape::ProductManager::OnSearchProduct, this));
-	app->route("/product/count"s, std::bind_front(&grape::ProductManager::OnGetProductCount, this));
+	app->route("/product/search"s,       std::bind_front(&grape::ProductManager::OnSearchProduct, this));
+	app->route("/product/count"s,        std::bind_front(&grape::ProductManager::OnGetProductCount, this));
 
-	app->route("/product/formulary/create"s, std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
-	app->route("/product/formulary/remove"s, std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
-	app->route("/product/formulary/get"s, std::bind_front(&grape::ProductManager::OnGetFormulary, this));
-	app->route("/product/formulary/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
-	app->route("/product/formulary/getformularyproducts"s, std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
-	app->route("/product/formulary/load"s, std::bind_front(&grape::ProductManager::OnLoadFormulary, this));
-	app->route("/product/formulary/checkname/{name}"s, std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
-	app->route("/product/formulary/hasformulary"s, std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
-	app->route("/product/formulary/import"s, std::bind_front(&grape::ProductManager::OnImportFormulary, this));
+	app->route("/product/formulary/create"s,                std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
+	app->route("/product/formulary/remove"s,                std::bind_front(&grape::ProductManager::OnRemoveFormulary, this));
+	app->route("/product/formulary/get"s,                   std::bind_front(&grape::ProductManager::OnGetFormulary, this));
+	app->route("/product/formulary/getproducts"s,           std::bind_front(&grape::ProductManager::OnGetProductsByFormulary, this));
+	app->route("/product/formulary/getformularyproducts"s,  std::bind_front(&grape::ProductManager::OnGetFormularyProducts, this));
+	app->route("/product/formulary/load"s,                  std::bind_front(&grape::ProductManager::OnLoadFormulary, this));
+	app->route("/product/formulary/checkname/{name}"s,      std::bind_front(&grape::ProductManager::OnCheckFormularyName, this));
+	app->route("/product/formulary/hasformulary"s,          std::bind_front(&grape::ProductManager::OnCheckHasFormulary, this));
+	app->route("/product/formulary/import"s,                std::bind_front(&grape::ProductManager::OnImportFormulary, this));
 	app->route("/product/formulary/getproductformularies"s, std::bind_front(&grape::ProductManager::OnGetFormularyForProduct, this));
-	app->route("/product/formulary/updateproduct"s, std::bind_front(&grape::ProductManager::OnUpdateByOverrideFormulary, this));
+	app->route("/product/formulary/updateproduct"s,         std::bind_front(&grape::ProductManager::OnUpdateByOverrideFormulary, this));
 
-	app->route("/product/inventory/add"s, std::bind_front(&grape::ProductManager::OnAddInventory, this));
-	app->route("/product/inventory/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
-	app->route("/product/inventory/update"s, std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
-	app->route("/product/inventory/get"s, std::bind_front(&grape::ProductManager::OnGetInventory, this));
-	app->route("/product/inventory/count"s, std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
+	app->route("/product/inventory/add"s,        std::bind_front(&grape::ProductManager::OnAddInventory, this));
+	app->route("/product/inventory/remove"s,     std::bind_front(&grape::ProductManager::OnRemoveInventory, this));
+	app->route("/product/inventory/update"s,     std::bind_front(&grape::ProductManager::OnUpdateInventory, this));
+	app->route("/product/inventory/get"s,	     std::bind_front(&grape::ProductManager::OnGetInventory, this));
+	app->route("/product/inventory/count"s,      std::bind_front(&grape::ProductManager::OnGetInventoryCount, this));
 	app->route("/product/inventory/stockcount"s, std::bind_front(&grape::ProductManager::OnGetStockEntryForMonth, this));
 
-	app->route("/product/category/add"s, std::bind_front(&grape::ProductManager::OnAddCategory, this));
+	app->route("/product/category/add"s,    std::bind_front(&grape::ProductManager::OnAddCategory, this));
 	app->route("/product/category/remove"s, std::bind_front(&grape::ProductManager::OnRemoveCategory, this));
 	app->route("/product/category/update"s, std::bind_front(&grape::ProductManager::OnUpdateCategory, this));
-	app->route("/product/category/get"s, std::bind_front(&grape::ProductManager::OnGetCategory, this));
+	app->route("/product/category/get"s,    std::bind_front(&grape::ProductManager::OnGetCategory, this));
 
-	app->route("/product/expired/mark"s, std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
-	app->route("/product/expired/get"s, std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
+	app->route("/product/expired/mark"s,  std::bind_front(&grape::ProductManager::OnMarkAsExpired, this));
+	app->route("/product/expired/get"s,   std::bind_front(&grape::ProductManager::OnGetExpiredProducts, this));
 	app->route("/product/expired/check"s, std::bind_front(&grape::ProductManager::OnCheckExpiredProduct, this));
 
-	app->route("/product/branch/transfer"s, std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
+	app->route("/product/branch/transfer"s,             std::bind_front(&grape::ProductManager::OnTransferProductsToBranch, this));
 	app->route("/product/branch/transfers/getpending"s, std::bind_front(&grape::ProductManager::OnGetBranchPendTransfers, this));
-	app->route("/product/branch/transfers/approve"s, std::bind_front(&grape::ProductManager::OnApproveBranchTransfers, this));
-	app->route("/product/branch/transfers/reject"s, std::bind_front(&grape::ProductManager::OnRejectBranchTransfers, this));
+	app->route("/product/branch/transfers/approve"s,    std::bind_front(&grape::ProductManager::OnApproveBranchTransfers, this));
+	app->route("/product/branch/transfers/reject"s,     std::bind_front(&grape::ProductManager::OnRejectBranchTransfers, this));
 
-	app->route("/product/invoice/create"s, std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
-	app->route("/product/invoice/remove"s, std::bind_front(&grape::ProductManager::OnRemoveInvoice, this));
-	app->route("/product/invoice/get"s, std::bind_front(&grape::ProductManager::OnGetInvoices, this));
-	app->route("/product/invoice/getbydate"s, std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
+	app->route("/product/stock/check"s, std::bind_front(&grape::ProductManager::OnStockCheck, this));
+
+	app->route("/product/invoice/create"s,      std::bind_front(&grape::ProductManager::OnCreateInvoice, this));
+	app->route("/product/invoice/remove"s,      std::bind_front(&grape::ProductManager::OnRemoveInvoice, this));
+	app->route("/product/invoice/get"s,         std::bind_front(&grape::ProductManager::OnGetInvoices, this));
+	app->route("/product/invoice/getbydate"s,   std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
 	app->route("/product/invoice/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProductsInInvoice, this));
 
 	app->route("/product/supplier/create"s, std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
 	app->route("/product/supplier/remove"s, std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
-	app->route("/product/supplier/get"s, std::bind_front(&grape::ProductManager::OnGetSupplier, this));
+	app->route("/product/supplier/get"s,    std::bind_front(&grape::ProductManager::OnGetSupplier, this));
 
+	app->route("/product/pack/create",       std::bind_front(&grape::ProductManager::OnCreatePack, this));
+	app->route("/product/pack/remove",       std::bind_front(&grape::ProductManager::OnRemovePack, this));
+	app->route("/product/pack/get",          std::bind_front(&grape::ProductManager::OnGetPacks, this));
+	app->route("/product/pack/sale",         std::bind_front(&grape::ProductManager::OnSalePackProducts, this));
+	app->route("/product/pack/products/get", std::bind_front(&grape::ProductManager::OnGetPackProducts, this));
+	app->route("/product/pack/products/add", std::bind_front(&grape::ProductManager::OnAddPackProducts, this));
+	app->route("/product/pack/products/remove", std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -1591,6 +1611,7 @@ void grape::ProductManager::Procedures()
 	RemovePharamProducts();
 	RemoveCategory();
 	RemoveFormulary();
+	RemovePack();
 }
 
 void grape::ProductManager::RemovePharamProducts()
@@ -1628,6 +1649,29 @@ void grape::ProductManager::RemoveCategory()
 				START TRANSACTION;
 					UPDATE pharma_products SET category_id = 0 WHERE pharmacy_id = pharm_id AND branch_id = bid AND category_id = cid;
 					DELETE FROM categories WHERE category_id  = cid;
+				COMMIT;
+			  END;
+		)");
+
+		auto fut = query->get_future();
+		app->mDatabase->push(query);
+		(void)fut.get(); //block until complete
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+	}
+}
+
+void grape::ProductManager::RemovePack()
+{
+	auto app = grape::GetApp();
+	try {
+		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
+			R"(CREATE PROCEDURE IF NOT EXISTS remove_pack(IN pack_id binary(16))
+			   BEGIN
+				START TRANSACTION;
+					DELETE FROM packs WHERE id  = pack_id;
+					DELETE FROM pack_products pp WHERE pp.pack_id = pack_id;
 				COMMIT;
 			  END;
 		)");
@@ -4277,6 +4321,50 @@ grape::ProductManager::OnGetAttachedFormulary(grape::request&& req, boost::urls:
 }
 
 boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnStockCheck(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get request");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected an argument");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [ps, buf2] = 
+			grape::serial::read<boost::fusion::vector<boost::uuids::uuid, std::int64_t>>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT 1 
+			   FROM pharma_products p
+			   WHERE p.stock_count >= ? AND p.product_id = ?
+			   AND   p.pharmacy_id = ?  AND p.branch_id = ?;)");
+		auto& pid   = boost::fusion::at_c<0>(ps);
+		auto& stock = boost::fusion::at_c<1>(ps);
+		query->m_arguments = { {
+			boost::mysql::field(stock),
+			boost::mysql::field(boost::mysql::blob(pid.begin(), pid.end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("Stock check is not valid");
+		co_return app->OkResult("Stock check is valid");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+
+boost::asio::awaitable<grape::response> 
 grape::ProductManager::OnCheckHasFormulary(grape::request&& req, boost::urls::matches&& match)
 {
 	auto app = grape::GetApp();
@@ -4389,5 +4477,275 @@ grape::ProductManager::OnImportFormulary(grape::request&& req, boost::urls::matc
 	}
 }
 
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnCreatePack(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post) 
+			co_return app->mNetManager.bad_request("expected a post");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [pack, buf2] = grape::serial::read<grape::pack>(buf);
+		if (pack.id.is_nil())
+			pack.id = boost::uuids::random_generator_mt19937{}();
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO packs VALUES (?,?,?,?,?,?);)");
+		query->m_arguments.emplace_back(grape::serial::make_mysql_arg(pack));
+
+		auto data = co_await app->run_query(query);
+		co_return app->OkResult("added");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnRemovePack(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post)
+			co_return app->mNetManager.bad_request("expected a post");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		
+		auto&& [pid, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto& pack_id = boost::fusion::at_c<0>(pid);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(CALL remove_pack(?);)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(pack_id.begin(), pack_id.end()))
+		}};
+		auto data = co_await app->run_query(query);
+		co_return app->OkResult("pack removed");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
 
 
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetPacks(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT * FROM packs WHERE pharmacy_id = ? AND branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		}};
+
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No packs for pharmacy");
+		grape::collection_type<grape::pack> cp;
+		auto pks = boost::fusion::at_c<0>(cp);
+		pks.reserve(data->size());
+		for (auto& d : *data) {
+			pks.emplace_back(grape::serial::build<grape::pack>(d.first));
+		}
+
+		co_return app->OkResult(cp, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnGetPackProducts(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [p, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto pkid = boost::fusion::at_c<0>(p);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT p.id,
+					  p.name, 
+				      ppp.stock_count,
+				      p.package_size,
+					  ppp.unit_price
+			 FROM pack_products pp
+			 INNER JOIN products p 
+             ON pp.product_id = p.id
+			 INNER JOIN pharma_products ppp
+			 ON ppp.product_id = pp.product_id
+			 WHERE pp.pack_id = ? AND pp.pharmacy_id = ? AND pp.branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(pkid.begin(), pkid.end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		}};
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("no data in pack");
+		using pack_t = boost::fusion::vector<
+			boost::uuids::uuid,
+			std::string,
+			std::int64_t,
+			std::int64_t,
+			pof::base::currency
+		>;
+		grape::collection_type<pack_t> cp;
+		auto& pks = boost::fusion::at_c<0>(cp);
+		pks.reserve(data->size());
+
+		for (auto& d : *data)
+		{
+			pks.emplace_back(grape::serial::build<pack_t>(d.first));
+		}
+
+		co_return app->OkResult(cp, req.keep_alive());
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnSalePackProducts(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [p, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto pkid = boost::fusion::at_c<0>(p);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"( SELECT pp.*
+			FROM pharma_products pp
+			INNER JOIN pack_products pks
+			ON pks.product_id = pp.product_id
+			WHERE pp.pack_id = ? AND pp.pharmacy_id = ? AND pp.branch_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(pkid.begin(), pkid.end())),
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("no data in pack");
+
+		
+	}
+	catch (const std::exception& exp){
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnAddPackProducts(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		
+		auto&& [pk, buf2] = grape::serial::read<grape::pack_product>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(INSERT INTO pack_products VALUES (?,?);)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(pk.pack_id.begin(), pk.pack_id.end())),
+			boost::mysql::field(boost::mysql::blob(pk.product_id.begin(), pk.product_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		co_return app->OkResult("Product added");
+	}
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnRemovePackProducts(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [pk, buf2] = grape::serial::read<grape::pack_product>(buf);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(DELETE FROM pack_products WHERE pack_id = ? AND product_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(pk.pack_id.begin(), pk.pack_id.end())),
+			boost::mysql::field(boost::mysql::blob(pk.product_id.begin(), pk.product_id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		co_return app->OkResult("Product added");
+	}
+	catch (const std::exception& exp){
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}

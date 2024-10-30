@@ -28,7 +28,6 @@ void grape::SaleManager::CreateSaleTable()
 				user_id         binary(16),
 				sale_id         binary(16) NOT NULL,
 				product_id      binary(16),
-				formulary_id    binary(16),
 				sale_date       datetime,
 				unit_cost_price binary(17),
 				unit_sale_price binary(17),
@@ -39,8 +38,7 @@ void grape::SaleManager::CreateSaleTable()
 				payment_addinfo text,
 				product_label   text,
 				sale_state      integer,
-				sale_add_info   text,
-				PRIMARY KEY     (sale_id)
+				sale_add_info   text
 			);)");
 		auto fut = query->get_future();
 		app->mDatabase->push(query);
@@ -64,12 +62,11 @@ void grape::SaleManager::CreateSaleProcedure()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE PROCEDURE IF NOT EXISTS do_sale (
-				IN pharmacy_id binary(16),
-				IN branch_id    binary(16),
-				IN user_id      binary(16),
-				IN sale_id      binary(16),
-				IN product_id   binary(16),
-				IN formulary_id binary(16),
+				IN pharmacy_id     binary(16),
+				IN branch_id       binary(16),
+				IN user_id         binary(16),
+				IN sale_id         binary(16),
+				IN product_id      binary(16),
 				IN sale_date       datetime,
 				IN unit_cost_price binary(17),
 				IN unit_sale_price binary(17),
@@ -83,7 +80,7 @@ void grape::SaleManager::CreateSaleProcedure()
 				IN sale_add_info   text)
 			   BEGIN
 				START TRANSACTION;
-				INSERT IGNORE INTO sales VALUES (pharmacy_id,branch_id,user_id,sale_id,product_id,formulary_id,
+				INSERT IGNORE INTO sales VALUES (pharmacy_id,branch_id,user_id,sale_id,product_id,
 				sale_date,unit_cost_price, unit_sale_price, discount,total_amount,quantity,payment_method,payment_addinfo,
 				product_label,sale_state,sale_add_info);
 				UPDATE pharma_products pp SET pp.stock_count = pp.stock_count - quantity WHERE pp.pharmacy_id = pharmacy_id AND pp.branch_id = branch_id AND pp.product_id = product_id;
@@ -106,10 +103,10 @@ void grape::SaleManager::CreateReturnProcedure()
 	try {
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE PROCEDURE IF NOT EXISTS do_return(IN pharm_id binary(16), 
-			   IN bid binary(16), 
-			   IN sid binary(16),
-			   IN pid binary(16),
-			   IN ret integer,
+			   IN bid      binary(16), 
+			   IN sid      binary(16),
+			   IN pid      binary(16),
+			   IN ret      integer,
 			   IN quantity integer)
 			   BEGIN
 				START TRANSACTION;
@@ -144,29 +141,40 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnSale(grape::reques
 		}
 
 		auto&& [sale, buf2] = grape::serial::read<grape::collection_type<grape::sale>>(buf);
-		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(CALL do_sales(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, R"(CALL do_sale(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);)"s);
 		auto& s = boost::fusion::at_c<0>(sale);
 		query->m_arguments.reserve(s.size());
 		auto sale_date = std::chrono::system_clock::now();
+		auto saleid    = boost::uuids::random_generator_mt19937{}();
+
+		pof::base::currency total;
 		for (auto& i : s) {
 			//for each item to sell
-			auto& item = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});
-			item.resize(19);
-			i.sale_date = sale_date;
-			i.state = sale_state::complete;
-
+			i.id          = saleid;
+			i.sale_date   = sale_date;
+			i.state       = sale_state::complete;
+			total         += i.total;
 			auto salebody = grape::serial::make_mysql_arg(i);
-			std::ranges::move(salebody, item.begin());
 
-			item[15] = boost::mysql::field(i.quantity);
-			item[16] = boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()));
-			item[17] = boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()));
-			item[18] = boost::mysql::field(boost::mysql::blob(i.product_id.begin(), i.product_id.end()));
+			query->m_arguments.emplace_back(std::move(salebody));
+
+			//item[15] = boost::mysql::field(i.quantity);
+			//item[16] = boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end()));
+			//item[17] = boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end()));
+			//item[18] = boost::mysql::field(boost::mysql::blob(i.product_id.begin(), i.product_id.end()));
 		}
-		auto data = app->run_query(query);
+		auto data = co_await app->run_query(query);
+		if (!data) throw std::runtime_error("error in processing");
+		//send back a receipt
+		grape::sale_receipt sr;
+		sr.id       = saleid;
+		sr.date     = sale_date;
+		sr.quantity = s.size();
+		sr.total    = total;
+
 
 		//no error, generate receipt
-		co_return app->OkResult("Sale complete");
+		co_return app->OkResult(sr, req.keep_alive());
 
 	}
 	catch (const std::exception& exp) {

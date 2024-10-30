@@ -119,8 +119,15 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, pharmacy_id)
 	(boost::uuids::uuid, branch_id)
 	(boost::uuids::uuid, id)
-	(boost::uuids::uuid, product_id)
+	(std::string, name)
+	(std::int64_t, quantity)
+	(pof::base::currency, cost)
+)
 
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), pack_product,
+	(boost::uuids::uuid, pack_id)
+	(boost::uuids::uuid, product_id)
 )
 
 //pharma products
@@ -349,6 +356,8 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnGetSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSupplierByDate(grape::request&& req, boost::urls::matches&& match);
 		
+		//product utilities
+		boost::asio::awaitable<grape::response> OnStockCheck(grape::request&& req, boost::urls::matches&& match);
 
 
 		//inter branch product management
@@ -357,6 +366,14 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnApproveBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnRejectBranchTransfers(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
+		//packs
+		boost::asio::awaitable<grape::response> OnCreatePack(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnRemovePack(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetPacks(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetPackProducts(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnSalePackProducts(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnAddPackProducts(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnRemovePackProducts(grape::request&& req, boost::urls::matches&& match);
 
 
 		// mysql procedures
@@ -364,6 +381,7 @@ namespace grape {
 		void RemovePharamProducts();
 		void RemoveCategory();
 		void RemoveFormulary();
+		void RemovePack();
 
 	};
 };

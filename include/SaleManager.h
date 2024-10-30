@@ -32,6 +32,7 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::chrono::system_clock::time_point, sale_date)
 	(pof::base::currency, unit_cost)
 	(pof::base::currency, unit_price)
+	(pof::base::currency, discount)
 	(pof::base::currency, total)
 	(std::uint32_t, quantity)
 	(std::string, payment_method)
@@ -48,6 +49,14 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::int64_t, sale_quantity)
 	(pof::base::currency, total_amt)
 	(std::string, username)
+)
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), sale_receipt,
+	(boost::uuids::uuid, id)
+	(std::chrono::system_clock::time_point, date)
+	(pof::base::currency, total)
+	(int64_t, quantity)
 )
 
 namespace grape {
