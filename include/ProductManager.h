@@ -301,6 +301,7 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnUpdatePharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnMarkUpPharmaProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<pof::base::net_manager::res_t> OnSearchProductBarcode(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetProductCount(grape::request&& req, boost::urls::matches&& match);
 
 
@@ -369,6 +370,7 @@ namespace grape {
 		//packs
 		boost::asio::awaitable<grape::response> OnCreatePack(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnRemovePack(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnRenamePack(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetPacks(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetPackProducts(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnSalePackProducts(grape::request&& req, boost::urls::matches&& match);

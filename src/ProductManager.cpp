@@ -469,6 +469,7 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/addpharma"s,    std::bind_front(&grape::ProductManager::OnAddPharmacyProduct, this));
 	app->route("/product/updatepharma"s, std::bind_front(&grape::ProductManager::OnUpdatePharmaProduct, this));
 	app->route("/product/search"s,       std::bind_front(&grape::ProductManager::OnSearchProduct, this));
+	app->route("/product/search/barcode"s,       std::bind_front(&grape::ProductManager::OnSearchProductBarcode, this));
 	app->route("/product/count"s,        std::bind_front(&grape::ProductManager::OnGetProductCount, this));
 
 	app->route("/product/formulary/create"s,                std::bind_front(&grape::ProductManager::OnCreateFormulary, this));
@@ -512,17 +513,19 @@ void grape::ProductManager::SetRoutes()
 	app->route("/product/invoice/getbydate"s,   std::bind_front(&grape::ProductManager::OnGetInvoicesByDate, this));
 	app->route("/product/invoice/getproducts"s, std::bind_front(&grape::ProductManager::OnGetProductsInInvoice, this));
 
-	app->route("/product/supplier/create"s, std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
-	app->route("/product/supplier/remove"s, std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
-	app->route("/product/supplier/get"s,    std::bind_front(&grape::ProductManager::OnGetSupplier, this));
+	app->route("/product/supplier/create"s,       std::bind_front(&grape::ProductManager::OnCreateSupplier, this));
+	app->route("/product/supplier/remove"s,       std::bind_front(&grape::ProductManager::OnRemoveSupplier, this));
+	app->route("/product/supplier/get"s,          std::bind_front(&grape::ProductManager::OnGetSupplier, this));
+	app->route("/product/supplier/getbydate"s,    std::bind_front(&grape::ProductManager::OnGetSupplierByDate, this));
 
 	app->route("/product/pack/create",       std::bind_front(&grape::ProductManager::OnCreatePack, this));
 	app->route("/product/pack/remove",       std::bind_front(&grape::ProductManager::OnRemovePack, this));
+	app->route("/product/pack/rename",       std::bind_front(&grape::ProductManager::OnRenamePack, this));
 	app->route("/product/pack/get",          std::bind_front(&grape::ProductManager::OnGetPacks, this));
 	app->route("/product/pack/sale",         std::bind_front(&grape::ProductManager::OnSalePackProducts, this));
 	app->route("/product/pack/products/get", std::bind_front(&grape::ProductManager::OnGetPackProducts, this));
 	app->route("/product/pack/products/add", std::bind_front(&grape::ProductManager::OnAddPackProducts, this));
-	app->route("/product/pack/products/remove", std::bind_front(&grape::ProductManager::OnRemoveProducts, this));
+	app->route("/product/pack/products/remove", std::bind_front(&grape::ProductManager::OnRemovePackProducts, this));
 }
 
 boost::asio::awaitable<pof::base::net_manager::res_t> 
@@ -1670,7 +1673,7 @@ void grape::ProductManager::RemovePack()
 			R"(CREATE PROCEDURE IF NOT EXISTS remove_pack(IN pack_id binary(16))
 			   BEGIN
 				START TRANSACTION;
-					DELETE FROM packs WHERE id  = pack_id;
+					DELETE FROM packs P WHERE p.pack_id = pack_id;
 					DELETE FROM pack_products pp WHERE pp.pack_id = pack_id;
 				COMMIT;
 			  END;
@@ -2636,6 +2639,92 @@ grape::ProductManager::OnSearchProduct(pof::base::net_manager::req_t&& req, boos
 		app->mNetManager.server_error(exp.what());
 	}
 }
+
+boost::asio::awaitable<pof::base::net_manager::res_t> 
+grape::ProductManager::OnSearchProductBarcode(pof::base::net_manager::req_t&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		auto& body = req.body();
+		if (body.empty()) co_return app->mNetManager.bad_request("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) &&
+			app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [bar, buf2] = grape::serial::read<grape::string_t>(buf);
+		std::string& barcode = boost::fusion::at_c<0>(bar);
+		if (barcode.empty()) throw std::invalid_argument("expected a string barcode");
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(	SELECT p.id,
+				f.formulary_id,
+				p.serial_num,
+				p.name,
+				p.generic_name,
+				p.class,
+				p.formulation,
+				p.strength,
+				p.strength_type,
+				p.usage_info,
+				p.indications,
+				pp.unitprice,
+				pp.costprice,
+				p.package_size,
+				pp.stock_count,
+				p.sideeffects,
+				p.barcode,
+				pp.category_id,
+				pp.min_stock_count
+	   FROM products p
+	   INNER JOIN pharma_products pp
+	   ON p.id = pp.product_id
+	   INNER JOIN formulary_content f
+	   ON pp.product_id = f.product_id
+	   INNER JOIN formulary_overrides fo
+	   ON fo.product_id = pp.product_id
+       WHERE pp.pharmacy_id = ? AND pp.branch_id = ? AND COALESCE(fo.barcode, p.barcode) = ?)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(barcode)
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("not found");
+		using vector_type = boost::fusion::vector<
+			boost::uuids::uuid,
+			boost::uuids::uuid,
+			std::int64_t,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			std::string,
+			pof::base::currency,
+			pof::base::currency,
+			std::int64_t,
+			std::int64_t,
+			std::string,
+			std::string,
+			std::int64_t,
+			std::int64_t>;
+		vector_type v = grape::serial::build<vector_type>((*data->begin()).first);
+		co_return app->OkResult(v, req.keep_alive());
+	}
+	catch (const std::exception& exp) 
+	{
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
 
 
 void grape::ProductManager::RemoveFormulary() {
@@ -4500,7 +4589,7 @@ grape::ProductManager::OnCreatePack(grape::request&& req, boost::urls::matches&&
 		query->m_arguments.emplace_back(grape::serial::make_mysql_arg(pack));
 
 		auto data = co_await app->run_query(query);
-		co_return app->OkResult("added");
+		co_return app->OkResult(grape::uid_t{pack.id}, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
 		spdlog::error(exp.what());
@@ -4541,6 +4630,41 @@ grape::ProductManager::OnRemovePack(grape::request&& req, boost::urls::matches&&
 	}
 }
 
+boost::asio::awaitable<grape::response> 
+grape::ProductManager::OnRenamePack(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::post)
+			co_return app->mNetManager.bad_request("expected a post");
+
+		auto& body = req.body();
+		if (body.empty()) throw std::invalid_argument("expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+		auto&& [name, buf2] = grape::serial::read<boost::fusion::vector<boost::uuids::uuid, std::string>>(buf);
+		boost::uuids::uuid& id = boost::fusion::at_c<0>(name);
+		std::string& n         = boost::fusion::at_c<1>(name);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(UPDATE packs SET name = ? WHERE pack_id = ?;)");
+		query->m_arguments = { {
+			boost::mysql::field(n),
+			boost::mysql::field(boost::mysql::blob(id.begin(), id.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		co_return app->OkResult("pack renamed");
+	}	
+	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+
 
 boost::asio::awaitable<grape::response> 
 grape::ProductManager::OnGetPacks(grape::request&& req, boost::urls::matches&& match)
@@ -4569,7 +4693,7 @@ grape::ProductManager::OnGetPacks(grape::request&& req, boost::urls::matches&& m
 		if (!data || data->empty())
 			co_return app->mNetManager.not_found("No packs for pharmacy");
 		grape::collection_type<grape::pack> cp;
-		auto pks = boost::fusion::at_c<0>(cp);
+		auto& pks = boost::fusion::at_c<0>(cp);
 		pks.reserve(data->size());
 		for (auto& d : *data) {
 			pks.emplace_back(grape::serial::build<grape::pack>(d.first));
@@ -4606,13 +4730,13 @@ grape::ProductManager::OnGetPackProducts(grape::request&& req, boost::urls::matc
 					  p.name, 
 				      ppp.stock_count,
 				      p.package_size,
-					  ppp.unit_price
+					  ppp.unitprice
 			 FROM pack_products pp
 			 INNER JOIN products p 
              ON pp.product_id = p.id
 			 INNER JOIN pharma_products ppp
 			 ON ppp.product_id = pp.product_id
-			 WHERE pp.pack_id = ? AND pp.pharmacy_id = ? AND pp.branch_id = ?;)");
+			 WHERE pp.pack_id = ? AND ppp.pharmacy_id = ? AND ppp.branch_id = ?;)");
 		query->m_arguments = { {
 			boost::mysql::field(boost::mysql::blob(pkid.begin(), pkid.end())),
 			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(), cred.pharm_id.end())),
@@ -4662,7 +4786,7 @@ grape::ProductManager::OnSalePackProducts(grape::request&& req, boost::urls::mat
 		}
 
 		auto&& [p, buf2] = grape::serial::read<grape::uid_t>(buf);
-		auto pkid = boost::fusion::at_c<0>(p);
+		const auto& pkid = boost::fusion::at_c<0>(p);
 
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
 			R"( SELECT pp.*
@@ -4678,8 +4802,14 @@ grape::ProductManager::OnSalePackProducts(grape::request&& req, boost::urls::mat
 		auto data = co_await app->run_query(query);
 		if (!data || data->empty())
 			co_return app->mNetManager.not_found("no data in pack");
-
-		
+		grape::collection_type<grape::pharma_product> mProducts;
+		auto& pp = boost::fusion::at_c<0>(mProducts);
+		pp.reserve(data->size());
+		for (auto& d : *data)
+		{
+			pp.emplace_back(grape::serial::build<grape::pharma_product>(d.first));
+		}
+		co_return app->OkResult(mProducts, req.keep_alive());
 	}
 	catch (const std::exception& exp){
 		spdlog::error(exp.what());
@@ -4723,8 +4853,8 @@ grape::ProductManager::OnRemovePackProducts(grape::request&& req, boost::urls::m
 {
 	auto app = grape::GetApp();
 	try {
-		if (req.method() != http::verb::get)
-			co_return app->mNetManager.bad_request("expected a get");
+		if (req.method() != http::verb::post)
+			co_return app->mNetManager.bad_request("expected a post");
 
 		auto& body = req.body();
 		if (body.empty()) throw std::invalid_argument("expected a body");
