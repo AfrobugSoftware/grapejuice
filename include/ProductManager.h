@@ -199,6 +199,8 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(boost::uuids::uuid, product_id)
 	(boost::uuids::uuid, inventory_id)
 	(std::chrono::system_clock::time_point, input_date)
+	(std::string, name)
+	(std::string, prod_name)
 
 )
 
@@ -346,16 +348,18 @@ namespace grape {
 		boost::asio::awaitable<pof::base::net_manager::res_t> OnCheckExpiredProduct(pof::base::net_manager::req_t&& req, boost::urls::matches&& match);
 
 		//invoices and suppliers
-		boost::asio::awaitable<grape::response> OnCreateInvoice(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnRemoveInvoice(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetInvoices(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetInvoicesByDate(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetProductsInInvoice(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnAddProductsInInvoice(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnCheckInvoice(grape::request&& req, boost::urls::matches&& match);
 
 		boost::asio::awaitable<grape::response> OnCreateSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnRemoveSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSupplierByDate(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnCheckSupplier(grape::request&& req, boost::urls::matches&& match);
 		
 		//product utilities
 		boost::asio::awaitable<grape::response> OnStockCheck(grape::request&& req, boost::urls::matches&& match);
