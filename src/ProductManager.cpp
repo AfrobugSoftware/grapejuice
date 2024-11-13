@@ -145,13 +145,13 @@ void grape::ProductManager::CreateSupplierTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS suppliers (
-			pharmacy_id binary(16),
-			branch_id binary(16),
-			supplier_id binary(16),
-			supplier_name VARCHAR(256),
-			date_created datetime,
+			pharmacy_id   binary(16),
+			branch_id     binary(16),
+			id            binary(16),
+			name          VARCHAR(256),
+			date_created  datetime,
 			date_modified datetime,
-			info text
+			info          text
 		);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -195,13 +195,14 @@ void grape::ProductManager::CreateInvoiceTable()
 		auto app = grape::GetApp();
 		auto query = std::make_shared<pof::base::dataquerybase>(app->mDatabase,
 			R"(CREATE TABLE IF NOT EXISTS invoices (
-				pharmacy_id binary(16),
-				branch_id binary(16),
-				supplier_id binary(16),
-				id binary(16),
-				product_id binary(16),
+				pharmacy_id  binary(16),
+				branch_id    binary(16),
+				supplier_id  binary(16),
+				id           binary(16),
+				product_id   binary(16),
 				inventory_id binary(16),
-				input_date datetime
+				input_date   datetime,
+				name         VARCHAR(256)
 		);)");
 		auto fut = query->get_future();
 		bool pushed = app->mDatabase->push(query);
@@ -3720,7 +3721,7 @@ grape::ProductManager::OnGetSupplier(grape::request&& req, boost::urls::matches&
 		auto&& [pg, buf2] = grape::serial::read<grape::page>(buf);
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase, 
 			R"(SELECT * FROM (SELECT s.*,
-				ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY supplier_name) as row_id
+				ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY name) as row_id
 				FROM suppliers s
 				WHERE pharmacy_id = ? AND branch_id = ? ) AS sub 
 				HAVING row_id BETWEEN ? AND ?;)");
@@ -3994,6 +3995,7 @@ grape::ProductManager::OnGetSupplierByDate(grape::request&& req, boost::urls::ma
 		co_return app->mNetManager.server_error(exp.what());
 	}
 }
+//branch chat
 
 boost::asio::awaitable<grape::response> 
 grape::ProductManager::OnCheckSupplier(grape::request&& req, boost::urls::matches&& match)
