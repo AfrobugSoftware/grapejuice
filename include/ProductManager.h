@@ -201,6 +201,8 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::chrono::system_clock::time_point, input_date)
 	(std::string, name)
 	(std::string, prod_name)
+	(pof::base::currency, cost)
+	(std::int64_t, quantity)
 
 )
 
@@ -354,6 +356,7 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnGetProductsInInvoice(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnAddProductsInInvoice(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnCheckInvoice(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetInvoiceFromInvenId(grape::request&& req, boost::urls::matches&& match);
 
 		boost::asio::awaitable<grape::response> OnCreateSupplier(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnRemoveSupplier(grape::request&& req, boost::urls::matches&& match);
