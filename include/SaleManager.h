@@ -51,6 +51,19 @@ BOOST_FUSION_DEFINE_STRUCT(
 	(std::string, username)
 )
 
+
+BOOST_FUSION_DEFINE_STRUCT(
+	(grape), sale_display,
+	(std::string, name)
+	(std::int32_t, quantity)
+	(pof::base::currency, unit_price)
+	(pof::base::currency, discount)
+	(pof::base::currency, total)
+	(boost::uuids::uuid, prod_id)
+	(pof::base::currency, unit_cost)
+)
+
+
 BOOST_FUSION_DEFINE_STRUCT(
 	(grape), sale_receipt,
 	(boost::uuids::uuid, id)
@@ -78,6 +91,7 @@ namespace grape {
 		boost::asio::awaitable<grape::response> OnGetSale(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnReturn(grape::request&& req, boost::urls::matches&& match);
 		boost::asio::awaitable<grape::response> OnGetSaleHistory(grape::request&& req, boost::urls::matches&& match);
+		boost::asio::awaitable<grape::response> OnGetReceipt(grape::request&& req, boost::urls::matches&& match);
 
 	};
 

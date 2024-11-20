@@ -648,6 +648,19 @@ namespace grape
 			return w.buf_;
 		}
 
+		template<FusionStruct... T>
+		boost::asio::mutable_buffer write(boost::asio::mutable_buffer buf, const T&... vals)
+		{
+			writer w(std::move(buf));
+			boost::fusion::vector<const T&...> vs{ vals... };
+			boost::fusion::for_each(vs, [&](const auto& i) {
+				boost::fusion::for_each(i, [&](const auto& i2) {
+					w(i2);
+					});
+				});
+			return w.buf_;
+		}
+
 		template<typename T>
 			requires FusionStruct<T>
 		constexpr size_t get_size(const T& val) {
@@ -655,6 +668,19 @@ namespace grape
 			boost::fusion::for_each(val, [&](const auto& i) {
 				s(i);
 			});
+			return s.size;
+		}
+
+		template<FusionStruct... T>
+		constexpr size_t get_size(const T&... vals)
+		{
+			sizer s{};
+			boost::fusion::vector<const T&...> vs{ vals... };
+			boost::fusion::for_each(vs, [&](const auto& i) {
+				boost::fusion::for_each(i, [&](const auto& i2) {
+					s(i2);
+					});
+				});
 			return s.size;
 		}
 	}

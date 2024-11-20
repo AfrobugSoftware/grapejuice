@@ -14,6 +14,7 @@ void grape::SaleManager::SetRoutes()
 	app->route("/sale/get", std::bind_front(&grape::SaleManager::OnGetSale, this));
 	app->route("/sale/gethistory", std::bind_front(&grape::SaleManager::OnGetSaleHistory, this));
 	app->route("/sale/return", std::bind_front(&grape::SaleManager::OnReturn, this));
+	app->route("/sale/getreceipt", std::bind_front(&grape::SaleManager::OnGetReceipt, this));
 }
 
 void grape::SaleManager::CreateSaleTable()
@@ -375,6 +376,71 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSaleHistory(gra
 		co_return app->OkResult(collect, req.keep_alive());
 	}
 	catch (const std::exception& exp) {
+		spdlog::error(exp.what());
+		co_return app->mNetManager.server_error(exp.what());
+	}
+}
+
+boost::asio::awaitable<grape::response> 
+grape::SaleManager::OnGetReceipt(grape::request&& req, boost::urls::matches&& match)
+{
+	auto app = grape::GetApp();
+	try {
+		if (req.method() != http::verb::get)
+			co_return app->mNetManager.bad_request("expected a get");
+		auto& body = req.body();
+		if (body.empty())
+			throw std::invalid_argument("Expected a body");
+
+		auto&& [cred, buf] = grape::serial::read<grape::credentials>(boost::asio::buffer(body));
+		if (!(app->mAccountManager.VerifySession(cred.account_id, cred.session_id) && app->mAccountManager.IsUser(cred.account_id, cred.pharm_id))) {
+			co_return app->mNetManager.auth_error("Account not authorised");
+		}
+
+		auto&& [saleId, buf2] = grape::serial::read<grape::uid_t>(buf);
+		auto& sid = boost::fusion::at_c<0>(saleId);
+
+		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
+			R"(SELECT p.name,
+			s.quantity,
+			s.unit_sale_price,
+			s.discount,
+			s.total_amount,
+			p.id,
+			s.unit_cost_price,
+			s.sale_id,
+			s.sale_date
+			FROM sales s
+			INNER JOIN products p ON p.id = s.product_id
+			WHERE s.pharmacy_id = ? AND s.branch_id = ? AND s.sale_id = ?)");
+		query->m_arguments = { {
+			boost::mysql::field(boost::mysql::blob(cred.pharm_id.begin(),  cred.pharm_id.end())),
+			boost::mysql::field(boost::mysql::blob(cred.branch_id.begin(), cred.branch_id.end())),
+			boost::mysql::field(boost::mysql::blob(sid.begin(), sid.end()))
+		} };
+		auto data = co_await app->run_query(query);
+		if (!data || data->empty())
+			co_return app->mNetManager.not_found("No sale found");
+		grape::collection_type<grape::sale_display> retsale;
+		auto& rs = boost::fusion::at_c<0>(retsale);
+		rs.reserve(data->size());
+		grape::sale_receipt sr;
+		
+		for (auto& d : *data)
+		{
+			auto& s = rs.emplace_back(grape::serial::build<grape::sale_display>(d.first));
+			sr.total    += s.total;
+			sr.quantity += s.quantity;
+		}
+		auto& dd = data->back().first;
+
+		sr.id   = boost::variant2::get<boost::uuids::uuid>(dd[7]);
+		sr.date = boost::variant2::get<std::chrono::system_clock::time_point>(dd[8]);
+
+		co_return app->OkResult(sr, retsale);
+	}
+	catch (const std::exception& exp)
+	{
 		spdlog::error(exp.what());
 		co_return app->mNetManager.server_error(exp.what());
 	}

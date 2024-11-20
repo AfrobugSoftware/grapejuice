@@ -343,32 +343,15 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			co_return app->mNetManager.auth_error("Account not authorised");
 		}
 
-		auto signOutTime = std::chrono::time_point_cast<boost::mysql::datetime::time_point::duration>(std::chrono::system_clock::now());
-
 		//do the sign out
 		const auto sid = boost::uuids::nil_uuid();
 		auto query = std::make_shared<pof::base::datastmtquery>(app->mDatabase,
-			R"(UPDATE accounts SET signout = ?, SET session_id = ? WHERE account_id = ?;)");
+			R"(UPDATE accounts SET session_id = ? WHERE account_id = ?;)");
 		query->m_arguments = { {
-				boost::mysql::field(boost::mysql::datetime(signOutTime)),
 				boost::mysql::field(boost::mysql::blob(sid.begin(), sid.end())),
 				boost::mysql::field(boost::mysql::blob(cred.account_id.begin(), cred.account_id.end()))
 		}};
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(60));
-		auto fut = query->get_future();
-		bool tried = app->mDatabase->push(query);
-		if (!tried) {
-			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
-			if (!tried) {
-				co_return app->mNetManager.server_error("Error in query");
-			}
-		}
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			co_return app->mNetManager.timeout_error();
-		}
-		auto d = fut.get();
+		auto data = co_await app->run_query(query);
 
 		//remove from active accounts
 		mActiveSessions.erase(cred.session_id);
@@ -433,23 +416,8 @@ boost::asio::awaitable<pof::base::net_manager::res_t>
 			boost::mysql::field(boost::mysql::blob(account.session_id.value().begin(), account.session_id.value().end())),
 			boost::mysql::field(boost::mysql::blob(account.account_id.begin(), account.account_id.end()))
 		}};
-		query->m_waittime = pof::base::dataquerybase::timer_t(co_await boost::asio::this_coro::executor);
-		query->m_waittime->expires_after(std::chrono::seconds(60));
-		auto fut = query->get_future();
-		bool tried = app->mDatabase->push(query);
-		if (!tried) {
-			tried = co_await app->mDatabase->retry(query); //try to push into the queue multiple times
-			if (!tried) {
-				co_return app->mNetManager.server_error("Error in query");
-			}
-		}
-		auto&& [ec] = co_await query->m_waittime->async_wait();
-		if (ec != boost::asio::error::operation_aborted) {
-			co_return app->mNetManager.timeout_error();
-		}
-		//check if we have an error
-		(void)fut.get();
-
+		
+		auto data = co_await app->run_query(query);
 		//update cache
 		mActiveSessions.erase(account.account_id);
 		mActiveSessions.emplace(std::make_pair(account.account_id, account));

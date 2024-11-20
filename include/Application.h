@@ -160,6 +160,22 @@ namespace grape {
 			return res;
 		}
 
+		template<grape::FusionStruct... T>
+		grape::response OkResult(const T&... data)
+		{
+			grape::response res{ http::status::ok, 11 };
+			res.set(http::field::server, USER_AGENT_STRING);
+			res.set(http::field::content_type, "application/octet-stream");
+			res.keep_alive(true);
+
+			grape::response::body_type::value_type value(grape::serial::get_size(data...), 0x00);
+			grape::serial::write(boost::asio::buffer(value), data...);
+
+			res.body() = std::move(value);
+			res.prepare_payload();
+			return res;
+		}
+
 		template<grape::FusionStruct T>
 		grape::response OkResultCompressed(const T& data, bool keep_alive = true, http::status stat = http::status::ok)
 		{
