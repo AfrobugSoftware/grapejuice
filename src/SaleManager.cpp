@@ -211,11 +211,10 @@ boost::asio::awaitable<grape::response> grape::SaleManager::OnGetSale(grape::req
 
 		query->m_sql = std::format(R"(
 			SELECT * FROM ( SELECT s.*,
-			ROW_NUMER() OVER (ORDER BY p.sale_date) AS row_id
+			ROW_NUMER() OVER (ORDER BY s.sale_date) AS row_id
 			FROM sales s
 			WHERE s.pharmacy_id = ? AND s.branch_id = ? AND s.sale_state = ? 
-			AND {} = ?;
-		) as sub
+			AND {} = ?) as sub
 		HAVING row_id BETWEEN ? AND ?;)", ymds[boost::fusion::at_c<0>(st)].data());
 
 		auto& item = query->m_arguments.emplace_back(std::vector<boost::mysql::field>{});

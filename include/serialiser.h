@@ -26,8 +26,9 @@
 #include <bit>
 #include <bitset>
 #include <exception>
+#include <boost/mysql/field_view.hpp>
 
-#define CHECK_SIZE( s, buf ) if( s > buf.size() ) throw std::logic_error("error in read");
+#define CHECK_SIZE( s, buf ) if( s > buf.size() ) throw std::overflow_error("error in read");
 
 namespace grape
 {
