@@ -21,6 +21,7 @@
 #include "PharmacyManager.h"
 #include "ProductManager.h"
 #include "SaleManager.h"
+#include "ReportManager.h"
 
 //protocol serialiser
 #include "serialiser.h"
@@ -200,6 +201,7 @@ namespace grape {
 		grape::PharmacyManager mPharmacyManager;
 		grape::ProductManager  mProductManager;
 		grape::SaleManager     mSaleManager;
+		grape::ReportManager   mReportManager;
 
 		boost::asio::awaitable<void> RunUpdateTimer();
 		boost::optional<pof::base::dataquerybase::timer_t> mUpdateTimer = boost::none;

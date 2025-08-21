@@ -79,6 +79,7 @@ void grape::Application::CreateRoutes()
 	mPharmacyManager.SetRoutes();
 	mProductManager.SetRoutes();
 	mSaleManager.SetRoutes();
+	mReportManager.SetRoutes();
 	SetRoutes();
 }
 

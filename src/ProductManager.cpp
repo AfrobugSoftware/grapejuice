@@ -302,7 +302,6 @@ void grape::ProductManager::CreateFormularyTable() {
 				FOREIGN KEY (formulary_id) REFERENCES formulary(id),
 				FOREIGN KEY (product_id)   REFERENCES products(id));)");
 		fut = std::move(query->get_future());
-		query->m_hold_connection = true;
 		pushed = app->mDatabase->push(query);
 		if(pushed)(void)fut.get();
 		else {
